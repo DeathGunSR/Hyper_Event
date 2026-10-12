@@ -1,0 +1,125 @@
+Changed database context to 'Holoo1'.
+=== Identity columns on POS tables ===
+TableName Col is_identity is_nullable
+--------- --- ----------- -----------
+Res_DailyRep F_Date 0 1
+Res_Fac_List F_Code 0 0
+Res_Fac_List Fl_Inc_Index 1 0
+Res_Facture F_Code 1 0
+Res_Facture F_Code_C 0 1
+Res_Facture F_Date 0 1
+Rs_FacList ID 1 0
+Rs_FacList F_Code 0 0
+Rs_FacList ID_FCode 0 0
+Rs_Facture ID 1 0
+Rs_Facture F_Code 0 0
+Rs_Facture F_Code_C 0 1
+Rs_Facture F_Date 0 1
+=== Indexes on Res_Facture / Res_Fac_List / Rs_Facture / Rs_FacList ===
+TableName IndexName type_desc is_unique is_primary_key KeyCols
+--------- --------- --------- --------- -------------- -------
+Res_Fac_List PK_Res_Fac_List CLUSTERED 1 1 F_Code,FL_Index
+Res_Facture PK_Res_Facture CLUSTERED 1 1 F_Code
+Rs_FacList PK__Rs_FacLi__D42223B53F47FEF2 CLUSTERED 1 1 F_Code,FL_Index,ID_FCode
+Rs_Facture PK__Rs_Factu__3214EC27306FCFB6 CLUSTERED 1 1 ID
+=== Modules referencing the ARCHIVE tables (Rs_FacList / Rs_Facture) ===
+type_desc name
+--------- ----
+=== def: sp_Res_ShowFacture_Fac_List ===
+Text
+----
+ 
+
+ 
+
+   CREATE PROCEDURE [dbo].[sp_Res_ShowFacture_Fac_List]
+
+   @F_Code  bigint,
+
+   @Fac_Type VarChar(1),
+
+   @FType_KF Varchar(1)
+
+    AS
+
+   Select F.*, FL.*, A.A_Code, A.A_Code_C, A.A_Name,A.WeightUnit,A.Place From Res_Facture F
+
+   Left Join Res_Fac_List FL On (F.F_Code = FL.F_Code )
+
+   Left join Article A On (A.A_Code = FL.A_Code)
+
+   Where F.F_Code = @F_Code and F.Fac_Type= @Fac_Type and F.FType_KF= @FType_KF
+
+ 
+
+=== def: sp_Res_Fac_ListAppend ===
+Text
+----
+ 
+
+    CREATE PROCEDURE [dbo].[sp_Res_Fac_ListAppend]
+
+      @F_Code bigint,
+
+      @FL_Index smallint,
+
+      @A_Code varchar(7),
+
+      @FL_Few float,
+
+      @FL_Price Float,
+
+      @FL_Comment varchar(4000),
+
+      @Levy Float,
+
+      @Scot Float ,
+
+      @Darsad_Takhfif  Float ,
+
+      @TakhfifSatrir     Float,
+
+      @Darsad_Type bit,
+
+      @Art_OuterOrd Bit,
+
+      @FewKarton Float,
+
+      @FewBasteh Float,
+
+      @SumTakhfifSatri_P Float,
+
+      @Sigar_Levy float,
+
+      @Sigar_Scot Float ,
+
+      @SelPriceID int ,
+
+      @MinA_Name varchar(255) ,
+
+      @Unit_Code int,
+
+      @Unit_Few  Float,
+
+      @Buy_Price Float,
+
+      @darsadporsant  Float,
+
+      @Vaseteh_Code     varchar(7),
+
+      @RFID_Code varchar(50),
+
+      @RFID_UserCode int
+
+       AS
+
+       INSERT INTO Res_Fac_List
+
+                (F_Code, FL_Index, A_Code, FL_Few, FL_Price, FL_Comment,Levy,Scot,Darsad_Takhfif,TakhfifSatrir, Darsad_Type,Art_OuterOrd,FewKarton,FewBasteh ,SumTakhfifSatri_P,Sigar_Levy ,Sigar_Scot,SelPriceID,MinA_Name ,Unit_Code,Unit_Few,Buy_Price,Vaset
+eh_Code,darsadporsant,RFID_Code,RFID_UserCode)
+
+       VALUES   (@F_Code, @FL_Index, @A_Code, @FL_Few, @FL_Price, @FL_Comment,@Levy,@Scot ,  @Darsad_Takhfif  ,  @TakhfifSatrir , @Darsad_Type,@Art_OuterOrd,@FewKarton,@FewBasteh,@SumTakhfifSatri_P,@Sigar_Levy ,@Sigar_Scot,@SelPriceID,@MinA_Name ,@Unit_Co
+de,@Unit_Few,@Buy_Price,@Vaseteh_Code,@darsadporsant,@RFID_Code,@RFID_UserCode)
+
+ 
+

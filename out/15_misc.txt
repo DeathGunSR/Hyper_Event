@@ -1,0 +1,8 @@
+T|name|is_identity
+-|----|-----------
+Res_Factur_Log|Id|1
+Res_Factur_Log|EditFlag|0
+PosTrans|ID|1
+F_Type|Cnt
+------|---
+2|233175

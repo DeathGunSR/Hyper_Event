@@ -1,0 +1,49 @@
+Changed database context to 'Holoo1'.
+=== USERDB key columns ===
+Col|Typ|Nullable
+---|---|--------
+Name|varchar|0
+UserCodeInc|int|0
+LockField|int|1
+SuperVizor|bit|1
+Fac_Sell|bit|1
+EditFact|bit|1
+DeActive|bit|0
+ChangeTakhfif|bit|0
+=== USERDB all users (active flag) ===
+UserCodeInc|Name|DeActive
+-----------|----|--------
+1|مدير|0
+2|فروشنده|0
+3|خانم پارسا|1
+4|خانم مهربان|1
+5|خانم م رحيمي|0
+6|خانم ز رحيمي|1
+7|MOHAMMAD|1
+8|رفيعي|1
+9|خانم ايماني|0
+10|حقگو|0
+11|خانم عبدي|0
+=== Res_Facture invoice types ===
+Fac_Type|F_Type|FType_KF|Cnt|MinF|MaxF
+--------|------|--------|---|----|----
+N|2|F|159|590510|590669
+N|3|F|1|590512|590512
+=== last 5 invoices: F_SumPrice vs line sum ===
+F_Code|F_Code_C|F_Date|F_Time|UserCode|F_SumPrice|F_Takhfif|LineSum|Items|F_Naghd|F_Pos|F_Nesieh|Pos_Code|CheckSum
+------|--------|------|------|--------|----------|---------|-------|-----|-------|-----|--------|--------|--------
+590669|21168|2026-02-09 00:00:00|15:30|9|148500.0|0.0|148500.0|1|0.0|148500.0|0.0|10200010001|MATCH
+590668|21167|2026-02-09 00:00:00|15:29|9|3750000.0|0.0|3750000.0|1|0.0|3750000.0|0.0|10200010001|MATCH
+590667|21166|2026-02-09 00:00:00|15:28|9|100000.0|0.0|100000.0|1|0.0|100000.0|0.0|10200010001|MATCH
+590666|21165|2026-02-09 00:00:00|15:28|9|2900000.0|0.0|2900000.0|3|0.0|2900000.0|0.0|10200010001|MATCH
+590665|21164|2026-02-09 00:00:00|15:25|5|3141000.0|0.0|3141000.0|4|0.0|0.0|3141000.0||MATCH
+=== per-user invoice counts (Res_Facture) ===
+UserCode|Name|Cnt|MaxF
+--------|----|---|----
+9|خانم ايماني|146|590669
+1|مدير|13|590657
+5|خانم م رحيمي|1|590665
+=== server version ===
+ProductVersion|Edition
+--------------|-------
+17.0.1000.7|Express Edition (64-bit)

@@ -1,0 +1,474 @@
+Changed database context to 'Holoo1'.
+=== def: sp_Res_FactureAppend ===
+Text
+----
+          CREATE PROCEDURE [dbo].[sp_Res_FactureAppend]
+
+              @F_Type tinyint,
+
+              @F_Code_C bigint,
+
+              @F_Date  smallDateTime,
+
+              @F_Time  varchar(5),
+
+              @Ext_Time1 varchar(5),
+
+              @Ext_Time2  varchar(5),
+
+              @C_Code varchar(5),
+
+              @Desk_Name varchar(10),
+
+              @F_Naghd Float,
+
+              @F_Nesieh Float,
+
+              @F_Takhfif Float,
+
+              @F_Service Float,
+
+              @F_Haz1 Float,
+
+              @F_Haz2 Float,
+
+              @F_SumPrice Float,
+
+              @F_Comment varchar(4000),
+
+              @UserCode smallint,
+
+              @C_Code_Peik varchar(5),
+
+              @Outer_Ord bit,
+
+              @Tasvieh_Peik bit,
+
+              @ResFacSender tinyint ,
+
+              @F_Pos Float ,
+
+              @Pos_Code varchar(11),
+
+              @Sum_Levy Float,
+
+              @sum_Scot Float,
+
+              @RemoteIp  varchar(20),
+
+              @RemoteHost  varchar(20),
+
+              @PPCFCode bigint ,
+
+              @Fac_Type VarChar(1) ,
+
+              @Money_Code Int,
+
+              @Money_Price Float,
+
+              @DarsadTakhfif  Float,
+
+              @DarsadService Float,
+
+              @Naghd_Moddat bit,
+
+              @FType_KF Varchar(1),
+
+              @Kind_Vat SmallInt ,
+
+              @Res_No   VarChar(4),
+
+              @SCale_No Varchar(1),
+
+              @PagerNo  Varchar(15),
+
+              @Alias_Name Varchar(60),
+
+              @Bon_No     Varchar(20),
+
+              @FBon_Price Float,
+
+              @CallerID_Num  Varchar(20),
+
+              @F_Peik Float ,
+
+              @UserSell  int,
+
+              @C_CodeGauranty varchar(5),
+
+  	@TasviehDate DateTime,
+
+  	@hlpFieldL bit,
+
+ 	@InsuranceId int,
+
+ 	@InsuranceNo varchar(20),
+
+ 	@MedicalNo Varchar(20),
+
+ 	@Alias_Mobile Varchar(60),
+
+ 	@IsLevyAndScot bit ,
+
+ 	@Sum_Sigar_Levy Float,
+
+ 	@sum_Sigar_Scot Float,
+
+ 	@Takhfif_P_KolFact Float,
+
+ 	@SumTakhfif_P	Float,
+
+         @RfCode varchar(50),
+
+         @RFIDUserCode varchar(10)
+
+               AS
+
+              INSERT INTO Res_Facture
+
+                         (Fac_Type,F_Type, F_Code_C, F_Date, F_Time, Ext_Time1, Ext_Time2, C_Code, Desk_Name, F_Naghd, F_Nesieh, F_Takhfif, F_Service, F_Haz1, F_Haz2,
+
+                          F_SumPrice, F_Comment, UserCode, C_Code_Peik, Outer_Ord, Tasvieh_Peik,ResFacSender , F_Pos , Pos_Code,Sum_Levy,sum_Scot,RemoteIp,RemoteHost,PPCFCode,Money_Code,Money_Price,DarsadTakhfif,DarsadService, Naghd_Moddat,FType_KF,Kind_V
+at,Res_No ,Scale_No,PagerNo,
+
+    					  Alias_Name,Bon_No,Bon_Price,CallerID_Num,F_Peik ,UserSell,C_CodeGauranty,TasviehDate,hlpFieldL,InsuranceId,InsuranceNo,MedicalNo,Alias_Mobile,IsLevyAndScot ,Sum_Sigar_Levy ,Sum_Sigar_Scot ,Takhfif_P_KolFact ,SumTakhfif_P,RFID_Code,RFID_UserCode
+)
+
+              VALUES
+
+                         (@Fac_Type,@F_Type, @F_Code_C, @F_Date, @F_Time, @Ext_Time1, @Ext_Time2, @C_Code, @Desk_Name, @F_Naghd, @F_Nesieh, @F_Takhfif, @F_Service, @F_Haz1, @F_Haz2,
+
+                          @F_SumPrice, @F_Comment, @UserCode, @C_Code_Peik, @Outer_Ord, @Tasvieh_Peik,@ResFacSender , @F_Pos , @Pos_Code,@Sum_Levy,@sum_Scot,@RemoteIp,@RemoteHost,@PPCFCode,@Money_Code,@Money_Price,@DarsadTakhfif,@DarsadService , @Naghd_Mo
+ddat ,@FType_KF, @Kind_Vat,@Res_No,@SCale_No,@PagerNo,
+
+    					  @Alias_Name,@Bon_No,@FBon_Price,@CallerID_Num,@F_Peik,@UserSell,@C_CodeGauranty,@TasviehDate,@hlpFieldL,@InsuranceId,@InsuranceNo,@MedicalNo,@Alias_Mobile,@IsLevyAndScot
+
+    					  ,@Sum_Sigar_Levy , @sum_Sigar_Scot ,@Takhfif_P_KolFact ,@SumTakhfif_P,@RfCode,@RFIDUserCode)
+
+ 
+
+              Return @@Identity
+
+=== def: sp_Res_FactureUpdate ===
+Text
+----
+           CREATE PROCEDURE [dbo].[sp_Res_FactureUpdate]
+
+               @F_Code bigint,
+
+               @F_Type tinyint,
+
+               @F_Code_C bigint,
+
+               @F_Date  smallDateTime,
+
+               @F_Time  varchar(5),
+
+               @Ext_Time1 varchar(5),
+
+               @Ext_Time2  varchar(5),
+
+               @C_Code varchar(5),
+
+               @Desk_Name varchar(10),
+
+               @F_Naghd Float,
+
+               @F_Nesieh Float,
+
+               @F_Takhfif Float,
+
+               @F_Service Float,
+
+               @F_Haz1 Float,
+
+               @F_Haz2 Float,
+
+               @F_SumPrice Float,
+
+               @F_Comment varchar(4000),
+
+               @UserCode smallint,
+
+               @C_Code_Peik varchar(5),
+
+               @Outer_Ord bit,
+
+               @Tasvieh_Peik bit,
+
+               @ResFacSender tinyint ,
+
+               @UserCodeFacEdit SmallInt,
+
+               @F_Pos Float ,
+
+               @Pos_Code varchar(11),
+
+               @Sum_Levy float,
+
+               @Sum_Scot Float,
+
+               @RemoteIp  varchar(20),
+
+               @RemoteHost  varchar(20),
+
+               @PPCFCode  int ,
+
+               @Fac_Type VarChar(1),
+
+               @Money_Code Int,
+
+               @Money_Price Float,
+
+               @DarsadTakhfif  Float,
+
+               @DarsadService Float ,
+
+               @Naghd_Moddat bit,
+
+              @FType_KF Varchar(1),
+
+              @Kind_Vat SmallInt,
+
+              @Res_No   VarChar(4),
+
+              @SCale_No Varchar(1),
+
+              @PagerNo Varchar(15),
+
+              @Alias_Name Varchar(60),
+
+              @Bon_No Varchar(20),
+
+              @FBon_Price Float,
+
+             @CallerID_Num  Varchar(20),
+
+             @F_Peik Float,
+
+             @UserSell  int ,
+
+             @C_CodeGauranty varchar(5),
+
+             @TasviehDate DateTime,
+
+             @hlpFieldL Bit,
+
+             @InsuranceId int,
+
+             @InsuranceNo varchar(20),
+
+             @MedicalNo Varchar(20),
+
+             @Alias_Mobile Varchar(60),
+
+             @IsLevyAndScot bit,
+
+             @Sum_Sigar_Levy float,
+
+             @Sum_Sigar_Scot Float,
+
+             @Takhfif_P_KolFact Float,
+
+             @SumTakhfif_P	Float,
+
+             @RfCode varchar(50),
+
+             @RFIDUserCode varchar(10)
+
+                AS
+
+           declare @Ip varchar(20),@Host varchar(20),@Code int
+
+ 
+
+               UPDATE    Res_Facture
+
+               SET
+
+                 Fac_Type=@Fac_Type,
+
+                 F_Type = @F_Type,
+
+                 F_Code_C = @F_Code_C,
+
+                 F_Date = @F_Date,
+
+                 F_Time = @F_Time,
+
+                 Ext_Time1 = @Ext_Time1,
+
+                 Ext_Time2 = @Ext_Time2,
+
+                 C_Code = @C_Code,
+
+                 Desk_Name = @Desk_Name,
+
+                 F_Naghd = @F_Naghd,
+
+                 F_Nesieh = @F_Nesieh,
+
+                 F_Takhfif = @F_Takhfif,
+
+                 F_Service = @F_Service,
+
+                 F_Haz1 = @F_Haz1,
+
+                 F_Haz2 =@F_Haz2,
+
+                 F_SumPrice = @F_SumPrice,
+
+                 F_Comment = @F_Comment,
+
+                 UserCode = IsNull(@UserCode,(Select UserCode from Res_Facture Where F_Code=@F_Code)),
+
+                 C_Code_Peik = @C_Code_Peik,
+
+                 Outer_Ord = @Outer_Ord,
+
+                 Tasvieh_Peik = @Tasvieh_Peik,
+
+                 ResFacSender = @ResFacSender ,
+
+                 UserCodeFacEdit = IsNull(@UserCodeFacEdit , 0 ) ,
+
+                 F_Pos = @F_Pos ,
+
+                 Pos_Code = @Pos_Code,
+
+                 Sum_Levy=@Sum_Levy,
+
+                 Sum_Scot=@Sum_Scot,
+
+                 Money_Code= @Money_Code,
+
+                 Money_Price= @Money_Price,
+
+                 DarsadTakhfif=@DarsadTakhfif,
+
+                 DarsadService=@DarsadService,
+
+                 Naghd_Moddat=@Naghd_Moddat ,
+
+                 FType_KF = @FType_KF,
+
+                 Kind_Vat = @Kind_Vat,
+
+                 Res_No  = @Res_No,
+
+                Scale_No = @SCale_No ,
+
+                PagerNo = @PagerNo ,
+
+                Alias_Name =@Alias_Name,
+
+                Bon_No =@Bon_No,
+
+                Bon_Price=@FBon_Price,
+
+               CallerID_Num=@CallerID_Num,
+
+                F_Peik=@F_Peik,
+
+                UserSell= @UserSell ,
+
+                C_CodeGauranty=@C_CodeGauranty,
+
+                TasviehDate=@TasviehDate,
+
+                hlpFieldL=@hlpFieldL ,
+
+                InsuranceId=@InsuranceId,
+
+                InsuranceNo=@InsuranceNo,
+
+                MedicalNo=@MedicalNo,
+
+                Alias_Mobile=@Alias_Mobile,
+
+                IsLevyAndScot=@IsLevyAndScot,
+
+                Sum_Sigar_Levy = @Sum_Sigar_Levy,
+
+                Sum_Sigar_Scot = @Sum_Sigar_Scot,
+
+     	       Takhfif_P_KolFact = @Takhfif_P_KolFact ,
+
+ 	       SumTakhfif_P	 = @SumTakhfif_P,
+
+                RFID_Code=@RfCode,
+
+                RFID_UserCode = @RFIDUserCode
+
+               Where F_Code = @F_Code
+
+ 
+
+               if (@RemoteIp <> '') and (@RemoteHost <> '')and (@PPCFCode<>0)
+
+               UPDATE    Res_Facture
+
+               SET
+
+                RemoteIp=@RemoteIp,
+
+                RemoteHost=@RemoteHost,
+
+                PPCFCode=@PPCFCode
+
+               Where F_Code = @F_Code
+
+ 
+
+              Return @F_Code
+
+=== def: sp_Res_FactureMaxF_Code_C ===
+Text
+----
+  CREATE PROCEDURE [dbo].[sp_Res_FactureMaxF_Code_C] 
+
+       @Fac_Type VarChar(1),
+
+  	 @FType_KF Varchar(1) 
+
+     AS
+
+      Select Max(F_Code_C)  As  MaxF_Code_C  from  Res_Facture 
+
+      Where Fac_Type= @Fac_Type  and FType_KF=@FType_KF and F_Type<>3
+
+=== def: sp_GetSumResSanadLine ===
+Text
+----
+ 
+
+ 
+
+ CREATE  PROCEDURE sp_GetSumResSanadLine
+
+   @SanadCode int 
+
+  AS
+
+  Declare @ColService varchar(3),@MoienService varchar(4),@TafziliService varchar(4),
+
+          @ColPeik    varchar(3),@MoienPeik    varchar(4),@TafziliPeik    varchar(4)
+
+ 
+
+  select  @ColPeik = Col_Code, @MoienPeik = Moien_Code, @TafziliPeik = Tafzili_Code  
+
+          from Set_Sarfasl where S_Name in ('Res_HazPeik') and IsActive = 1
+
+ 
+
+ 
+
+  select  @ColService = Col_Code, @MoienService = Moien_Code, @TafziliService = Tafzili_Code  
+
+          from Set_Sarfasl where S_Name in ('Res_Service') and IsActive = 1 select isnull(sum(Bes),0) from SND_LIST where 
+
+ 	(Sanad_Code = @SanadCode and  Col_Code = @ColService and  Moien_Code = @MoienService and Tafzili_Code = @TafziliService)
+
+         or (Sanad_Code = @SanadCode and Col_Code = @ColPeik and  Moien_Code = @MoienPeik and Tafzili_Code = @TafziliPeik)
+

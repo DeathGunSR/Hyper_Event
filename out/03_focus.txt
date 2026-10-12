@@ -1,0 +1,262 @@
+Changed database context to 'Holoo1'.
+=== Exact COUNT(*) ===
+T|C
+-|-
+FACTURE|9045
+FACTART|435199
+Res_Facture|160
+Res_Fac_List|435
+Rs_Facture|233175
+Rs_FacList|647151
+Res_DailyRep|1418
+PosTrans|275827
+PosActive|10
+TmpFacture|0
+TmpFactart|0
+Res_Factur_Log|160
+=== Columns: Res_Facture ===
+name|TypeName|max_length
+----|--------|----------
+F_Code|bigint|8
+F_Type|tinyint|1
+F_Code_C|bigint|8
+F_Date|smalldatetime|4
+F_Time|nvarchar|10
+Ext_Time1|nvarchar|10
+Ext_Time2|nvarchar|10
+C_Code|nvarchar|10
+Desk_Name|nvarchar|20
+F_Naghd|float|8
+F_Nesieh|float|8
+F_Takhfif|float|8
+F_Service|float|8
+F_Haz1|float|8
+F_Haz2|float|8
+F_SumPrice|float|8
+F_Comment|nvarchar|8000
+UserCode|smallint|2
+C_Code_Peik|varchar|5
+Outer_Ord|bit|1
+Tasvieh_Peik|bit|1
+ResFacSender|tinyint|1
+UserCodeFacEdit|smallint|2
+F_Pos|float|8
+Pos_Code|varchar|11
+Sum_Levy|float|8
+Sum_Scot|float|8
+Check_Tasvieh|bit|1
+RemoteIp|nvarchar|40
+PPCFCode|smallint|2
+RemoteHost|nvarchar|40
+Fac_Type|varchar|1
+CheckPrint|bit|1
+Money_Code|int|4
+Money_Price|float|8
+DarsadTakhfif|float|8
+DarsadService|float|8
+UsedByUser|varchar|30
+Naghd_Moddat|bit|1
+FType_KF|varchar|1
+Kind_Vat|smallint|2
+Res_No|nvarchar|8
+Scale_No|nvarchar|2
+PagerNo|varchar|15
+ExporterSId|int|4
+Bon_Price|float|8
+Bon_No|varchar|20
+Alias_Name|varchar|60
+CallerId_Num|varchar|20
+F_Peik|float|8
+UserSell|int|4
+Selected|bit|1
+C_CodeGauranty|varchar|5
+TasviehDate|datetime|8
+hlpFieldL|bit|1
+InsuranceId|smallint|2
+InsuranceNo|varchar|20
+MedicalNo|varchar|20
+Alias_Mobile|varchar|60
+IsLevyAndScot|bit|1
+ScaleNo|int|4
+UPDATEFLAG|bit|1
+Sum_Sigar_Levy|float|8
+Sum_Sigar_Scot|float|8
+Takhfif_P_KolFact|float|8
+SumTakhfif_P|float|8
+FACTRANS|int|4
+RFID_Code|varchar|50
+RFID_UserCode|int|4
+=== Columns: Rs_Facture ===
+name|TypeName|max_length
+----|--------|----------
+ID|int|4
+F_Code|bigint|8
+F_Type|tinyint|1
+F_Code_C|bigint|8
+F_Date|smalldatetime|4
+F_Time|nvarchar|10
+Ext_Time1|nvarchar|10
+Ext_Time2|nvarchar|10
+C_Code|nvarchar|10
+Desk_Name|nvarchar|20
+F_Naghd|float|8
+F_Nesieh|float|8
+F_Takhfif|float|8
+F_Service|float|8
+F_Haz1|float|8
+F_Haz2|float|8
+F_SumPrice|float|8
+F_Comment|nvarchar|8000
+UserCode|smallint|2
+C_Code_Peik|varchar|5
+Outer_Ord|bit|1
+Tasvieh_Peik|bit|1
+ResFacSender|tinyint|1
+UserCodeFacEdit|smallint|2
+F_Pos|float|8
+Pos_Code|varchar|11
+Sum_Levy|float|8
+Sum_Scot|float|8
+Check_Tasvieh|bit|1
+RemoteIp|nvarchar|40
+PPCFCode|smallint|2
+RemoteHost|nvarchar|40
+Fac_Type|varchar|1
+CheckPrint|bit|1
+Money_Code|int|4
+Money_Price|float|8
+DarsadTakhfif|float|8
+DarsadService|float|8
+UsedByUser|varchar|30
+Naghd_Moddat|bit|1
+FType_KF|varchar|1
+Kind_Vat|smallint|2
+Res_No|nvarchar|8
+Scale_No|nvarchar|2
+PagerNo|varchar|15
+ExporterSId|int|4
+Bon_Price|float|8
+Bon_No|varchar|20
+Alias_Name|varchar|60
+CallerId_Num|varchar|20
+F_Peik|float|8
+UserSell|int|4
+Selected|bit|1
+C_CodeGauranty|varchar|5
+TasviehDate|datetime|8
+hlpFieldL|bit|1
+InsuranceId|smallint|2
+InsuranceNo|varchar|20
+MedicalNo|varchar|20
+Alias_Mobile|varchar|60
+IsLevyAndScot|bit|1
+Sum_Sigar_Levy|float|8
+Sum_Sigar_Scot|float|8
+ScaleNo|int|4
+UPDATEFLAG|bit|1
+FACTRANS|int|4
+Takhfif_P_KolFact|float|8
+SumTakhfif_P|float|8
+RfCardName|varchar|500
+=== Columns: Res_DailyRep ===
+name|TypeName|max_length
+----|--------|----------
+User_Code|int|4
+User_Date|datetime|8
+Fac_Type|varchar|1
+Sum_Price|float|8
+Sum_Naghd|float|8
+Sum_Nesieh|float|8
+Sum_Pos|float|8
+Sum_Takhfif|float|8
+Sum_Hazineh|float|8
+Sum_LevyScot|float|8
+Sum_Bon|float|8
+F_Date|smalldatetime|4
+SumService|float|8
+=== Columns: PosTrans / PosActive ===
+name|TypeName|max_length
+----|--------|----------
+ID|int|4
+PosType|tinyint|1
+Pos_Serial|nvarchar|100
+ACOUND_N_ID|int|4
+PosPrice|float|8
+bank_name|nvarchar|510
+ResultPosInt64|nvarchar|100
+Pos_IPAddress|nvarchar|100
+TransDate|datetime|8
+Pos_AcceptorId|nvarchar|100
+Pos_TerminalId|nvarchar|100
+SerialCode|nvarchar|100
+CompanyName|nvarchar|100
+ischange|bit|1
+name|TypeName|max_length
+----|--------|----------
+ID|int|4
+PosType|tinyint|1
+PosSerial|nvarchar|100
+PosKey|nvarchar|100
+=== Res_Facture: sample current-day invoices ===
+F_Code|F_Type|F_Code_C|F_Date|F_Time|C_Code|Desk_Name|Res_No|Pos_Code|F_SumPrice|F_Takhfif|DarsadTakhfif|SumTakhfif_P|Takhfif_P_KolFact|F_Service|F_Haz1|F_Haz2|F_Naghd|F_Nesieh|Bon_Price|Sum_Levy|Sum_Scot|Check_Tasvieh|Fac_Type|FType_KF|UserCode|Selected
+------|------|--------|------|------|------|---------|------|--------|----------|---------|-------------|------------|-----------------|---------|------|------|-------|--------|---------|--------|--------|-------------|--------|--------|--------|--------
+590669|2|21168|2026-02-09 00:00:00|15:30|00001||0|10200010001|148500.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590668|2|21167|2026-02-09 00:00:00|15:29|00001||0|10200010001|3750000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590667|2|21166|2026-02-09 00:00:00|15:28|00001||0|10200010001|100000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590666|2|21165|2026-02-09 00:00:00|15:28|00001||0|10200010001|2900000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590665|2|21164|2026-02-09 00:00:00|15:25|00001||0||3141000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|3141000.0|0.0|0.0|0.0|0|N|F|5|0
+590664|2|21163|2026-02-09 00:00:00|15:23|00001||0|10200010001|420000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590663|2|21162|2026-02-09 00:00:00|15:17|00001||0||1220000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|1220000.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590662|2|21161|2026-02-09 00:00:00|15:15|00001||0|10200010001|820000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590661|2|21160|2026-02-09 00:00:00|15:10|00001||0|10200010001|1800000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590660|2|21159|2026-02-09 00:00:00|15:08|00001||0|10200010001|550000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590659|2|21158|2026-02-09 00:00:00|15:04|00001||0||4530000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|4530000.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590658|2|21157|2026-02-09 00:00:00|15:01|00001||0|10200010001|480000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590657|2|21156|2026-02-09 00:00:00|14:51|00001||0||10442000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|10442000.0|0.0|0.0|0.0|0.0|0|N|F|1|0
+590656|2|21155|2026-02-09 00:00:00|14:52|00001||0|10200010001|350000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590655|2|21154|2026-02-09 00:00:00|14:51|00001||0|10200010001|3950000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590654|2|21153|2026-02-09 00:00:00|14:51|00001||0|10200010001|540000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590653|2|21152|2026-02-09 00:00:00|14:50|00001||0|10200010001|1050000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590652|2|21151|2026-02-09 00:00:00|14:44|00001||0|10200010001|1650000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+590651|2|21150|2026-02-09 00:00:00|14:33|00001||0||21857500.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|21857500.0|0.0|0.0|0.0|0.0|0|N|F|1|0
+590650|2|21149|2026-02-09 00:00:00|14:21|00001||0|10200010001|3300000.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0.0|0|N|F|9|0
+=== Res_Facture: hourly distribution of current day ===
+F_Date|Hour|Cnt|Total
+------|----|---|-----
+2026-02-09 00:00:00|07|6|5372500.0
+2026-02-09 00:00:00|08|27|31883500.0
+2026-02-09 00:00:00|09|10|7730000.0
+2026-02-09 00:00:00|10|12|21635400.0
+2026-02-09 00:00:00|11|22|93102700.0
+2026-02-09 00:00:00|12|21|110870550.0
+2026-02-09 00:00:00|13|31|87425050.0
+2026-02-09 00:00:00|14|19|66000000.0
+2026-02-09 00:00:00|15|12|19859500.0
+=== Rs_Facture: sample latest archive rows ===
+ID|F_Code|F_Type|F_Code_C|F_Date|F_Time|Ext_Time1|Ext_Time2|C_Code|Desk_Name|F_Naghd|F_Nesieh|F_Takhfif|F_Service|F_Haz1|F_Haz2|F_SumPrice|F_Comment|UserCode|C_Code_Peik|Outer_Ord|Tasvieh_Peik|ResFacSender|UserCodeFacEdit|F_Pos|Pos_Code|Sum_Levy|Sum_Scot|Check_Tasvieh|RemoteIp|PPCFCode|RemoteHost|Fac_Type|CheckPrint|Money_Code|Money_Price|DarsadTakhfif|DarsadService|UsedByUser|Naghd_Moddat|FType_K
+F|Kind_Vat|Res_No|Scale_No|PagerNo|ExporterSId|Bon_Price|Bon_No|Alias_Name|CallerId_Num|F_Peik|UserSell|Selected|C_CodeGauranty|TasviehDate|hlpFieldL|InsuranceId|InsuranceNo|MedicalNo|Alias_Mobile|IsLevyAndScot|Sum_Sigar_Levy|Sum_Sigar_Scot|ScaleNo|UPDATEFLAG|FACTRANS|Takhfif_P_KolFact|SumTakhfif_P|RfCardName
+--|------|------|--------|------|------|---------|---------|------|---------|-------|--------|---------|---------|------|------|----------|---------|--------|-----------|---------|------------|------------|---------------|-----|--------|--------|--------|-------------|--------|--------|----------|--------|----------|----------|-----------|-------------|-------------|----------|------------|-------
+-|--------|------|--------|-------|-----------|---------|------|----------|------------|------|--------|--------|--------------|-----------|---------|-----------|-----------|---------|------------|-------------|--------------|--------------|-------|----------|--------|-----------------|------------|----------
+373213|590509|2|21008|2026-02-08 00:00:00|07:53|||00001||0.0|0.0|0.0|0.0|0.0|0.0|1310000.0||2|00000|0|0|0|NULL|1310000.0|10200010001|0.0|0.0|0||0||N|0|1|1.0|0.0|0.0|NULL|0|F|2|0|0|0|NULL|0.0|0|||0.0|0|0||2026-02-08 00:00:00.000|1|NULL|NULL|NULL||1|NULL|NULL|0|0|0|0.0|0.0|NULL
+373212|590508|2|21007|2026-02-08 00:00:00|07:49|||00001||0.0|0.0|50.0|0.0|0.0|0.0|2096250.0||2|00000|0|0|0|NULL|2096200.0|10200010001|0.0|0.0|0||0||N|0|1|1.0|0.0|0.0|NULL|0|F|2|0|0|0|NULL|0.0|0|||0.0|0|0||2026-02-08 00:00:00.000|1|NULL|NULL|NULL||1|NULL|NULL|0|0|0|0.0|0.0|NULL
+373211|590507|2|21006|2026-02-08 00:00:00|07:48|||00001||0.0|0.0|0.0|0.0|0.0|0.0|1780000.0||2|00000|0|0|0|NULL|1780000.0|10200010001|0.0|0.0|0||0||N|0|1|1.0|0.0|0.0|NULL|0|F|2|0|0|0|NULL|0.0|0|||0.0|0|0||2026-02-08 00:00:00.000|1|NULL|NULL|NULL||1|NULL|NULL|0|0|0|0.0|0.0|NULL
+373210|590506|2|21005|2026-02-08 00:00:00|07:47|||00001||0.0|0.0|0.0|0.0|0.0|0.0|3078000.0||2|00000|0|0|0|NULL|3078000.0|10200010001|0.0|0.0|0||0||N|0|1|1.0|0.0|0.0|NULL|0|F|2|0|0|0|NULL|0.0|0|||0.0|0|0||2026-02-08 00:00:00.000|1|NULL|NULL|NULL||1|NULL|NULL|0|0|0|0.0|0.0|NULL
+373209|590505|2|21004|2026-02-08 00:00:00|07:45|||00001||160000.0|0.0|0.0|0.0|0.0|0.0|160000.0||2|00000|0|0|0|NULL|0.0||0.0|0.0|0||0||N|0|1|1.0|0.0|0.0|NULL|0|F|2|0|0|0|NULL|0.0|0|||0.0|0|0||2026-02-08 00:00:00.000|1|NULL|NULL|NULL||1|NULL|NULL|0|0|0|0.0|0.0|NULL
+373208|590504|2|21003|2026-02-08 00:00:00|07:45|||00001||0.0|0.0|0.0|0.0|0.0|0.0|650000.0||2|00000|0|0|0|NULL|650000.0|10200010001|0.0|0.0|0||0||N|0|1|1.0|0.0|0.0|NULL|0|F|2|0|0|0|NULL|0.0|0|||0.0|0|0||2026-02-08 00:00:00.000|1|NULL|NULL|NULL||1|NULL|NULL|0|0|0|0.0|0.0|NULL
+373207|590503|2|21002|2026-02-08 00:00:00|07:44|||00001||1090000.0|0.0|0.0|0.0|0.0|0.0|1090000.0||2|00000|0|0|0|NULL|0.0||0.0|0.0|0||0||N|0|1|1.0|0.0|0.0|NULL|0|F|2|0|0|0|NULL|0.0|0|||0.0|0|0||2026-02-08 00:00:00.000|1|NULL|NULL|NULL||1|NULL|NULL|0|0|0|0.0|0.0|NULL
+373206|590502|2|21001|2026-02-08 00:00:00|07:43|||00001||0.0|0.0|0.0|0.0|0.0|0.0|450000.0||2|00000|0|0|0|NULL|450000.0|10200010001|0.0|0.0|0||0||N|0|1|1.0|0.0|0.0|NULL|0|F|2|0|0|0|NULL|0.0|0|||0.0|0|0||2026-02-08 00:00:00.000|1|NULL|NULL|NULL||1|NULL|NULL|0|0|0|0.0|0.0|NULL
+373205|590501|2|21000|2026-02-08 00:00:00|07:42|||00001||0.0|0.0|0.0|0.0|0.0|0.0|500000.0||2|00000|0|0|0|NULL|500000.0|10200010001|0.0|0.0|0||0||N|0|1|1.0|0.0|0.0|NULL|0|F|2|0|0|0|NULL|0.0|0|||0.0|0|0||2026-02-08 00:00:00.000|1|NULL|NULL|NULL||1|NULL|NULL|0|0|0|0.0|0.0|NULL
+373204|590500|2|20999|2026-02-08 00:00:00|07:41|||00001||0.0|0.0|0.0|0.0|0.0|0.0|4750000.0||2|00000|0|0|0|NULL|4750000.0|10200010001|0.0|0.0|0||0||N|0|1|1.0|0.0|0.0|NULL|0|F|2|0|0|0|NULL|0.0|0|||0.0|0|0||2026-02-08 00:00:00.000|1|NULL|NULL|NULL||1|NULL|NULL|0|0|0|0.0|0.0|NULL
+=== Res_DailyRep: sample ===
+User_Code|User_Date|Fac_Type|Sum_Price|Sum_Naghd|Sum_Nesieh|Sum_Pos|Sum_Takhfif|Sum_Hazineh|Sum_LevyScot|Sum_Bon|F_Date|SumService
+---------|---------|--------|---------|---------|----------|-------|-----------|-----------|------------|-------|------|----------
+11|2025-09-14 00:00:00.000|N|222349600.0|36387200.0|0.0|185961900.0|500.0|0.0|0.0|0.0|2025-09-14 00:00:00|0.0
+11|2025-09-15 00:00:00.000|N|226819550.0|31449300.0|0.0|195369800.0|450.0|0.0|0.0|0.0|2025-09-15 00:00:00|0.0
+11|2025-09-18 00:00:00.000|N|198054864.0|46345000.0|650000.0|151059400.0|464.0|0.0|0.0|0.0|2025-09-17 00:00:00|0.0
+11|2025-09-19 00:00:00.000|N|144520000.0|33989200.0|2825000.0|107705400.0|400.0|0.0|0.0|0.0|2025-09-19 00:00:00|0.0
+11|2025-09-23 00:00:00.000|N|412711664.0|45863200.0|1600000.0|365247300.0|1164.0|0.0|0.0|0.0|2025-09-22 00:00:00|0.0
+11|2025-09-24 00:00:00.000|N|398842500.0|43275000.0|3692000.0|351874700.0|800.0|0.0|0.0|0.0|2025-09-23 00:00:00|0.0
+11|2025-10-01 00:00:00.000|N|189319450.0|15054200.0|545000.0|173719700.0|550.0|0.0|0.0|0.0|2025-10-01 00:00:00|0.0
+11|2025-10-02 00:00:00.000|N|265954750.0|45141100.0|5130000.0|215683200.0|450.0|0.0|0.0|0.0|2025-10-02 00:00:00|0.0
+11|2025-10-05 00:00:00.000|N|521588550.0|48411900.0|3290000.0|469885400.0|1250.0|0.0|0.0|0.0|2025-10-03 00:00:00|0.0
+11|2025-10-06 00:00:00.000|N|377903350.0|48946800.0|640000.0|328315700.0|850.0|0.0|0.0|0.0|2025-10-05 00:00:00|0.0

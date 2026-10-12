@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<PosDiscount>
+  <Server>.\SQLEXPRESS</Server>
+  <Database>Holoo1</Database>
+  <UseWindowsAuth>true</UseWindowsAuth>
+  <SqlUser>sa</SqlUser>
+  <SqlPassword>
+  </SqlPassword>
+  <ConnectTimeoutSeconds>5</ConnectTimeoutSeconds>
+  <PollIntervalMs>1500</PollIntervalMs>
+  <SkipExistingOnStart>true</SkipExistingOnStart>
+  <LastCashierCode>2</LastCashierCode>
+  <DiscountEnabled>true</DiscountEnabled>
+  <DiscountMode>percent</DiscountMode>
+  <Percent>5</Percent>
+  <FixedAmount>10000</FixedAmount>
+  <MaxPercent>10</MaxPercent>
+  <MaxAmount>100000</MaxAmount>
+  <MinInvoiceAmount>500000</MinInvoiceAmount>
+  <MaxDiscountPerDay>0</MaxDiscountPerDay>
+  <RequireDiscountPermission>false</RequireDiscountPermission>
+  <RoundTo>1000</RoundTo>
+  <PointsEnabled>true</PointsEnabled>
+  <PointsPerAmountToman>500000</PointsPerAmountToman>
+  <PointsBase>gross</PointsBase>
+  <LocalDbFile>pos-discount.db</LocalDbFile>
+  <CaptureMobileInPopup>true</CaptureMobileInPopup>
+  <RoundInFavorOfCustomer>true</RoundInFavorOfCustomer>
+  <StartTime>00:00</StartTime>
+  <EndTime>23:59</EndTime>
+  <Tiers>
+    <Tier MinAmount="500000" Percent="2" Amount="0" />
+    <Tier MinAmount="2000000" Percent="3" Amount="0" />
+    <Tier MinAmount="5000000" Percent="5" Amount="0" />
+  </Tiers>
+  <AutoCloseSeconds>30</AutoCloseSeconds>
+  <PlaySound>true</PlaySound>
+  <PopupCorner>center</PopupCorner>
+  <AlwaysOnTop>true</AlwaysOnTop>
+  <StartMinimizedToTray>false</StartMinimizedToTray>
+  <LogFolder>logs</LogFolder>
+</PosDiscount>
+<!-- فایل تنظیمات برنامه «تخفیف لحظه‌ای صندوق هولو» — قابل ویرایش دستی هم هست -->

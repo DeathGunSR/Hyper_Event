@@ -1,0 +1,318 @@
+Changed database context to 'Holoo1'.
+=== FACTURE by type (fixed) ===
+Fac_Type|Cnt|Deleted|MinD|MaxD|TotalPrice
+--------|---|-------|----|----|----------
+K|5571|0|2024-09-01 00:00:00.000|2026-02-09 00:00:00.000|456414419747.0
+F|2666|0|2024-09-01 00:00:00.000|2026-02-08 00:00:00.000|576365229436.0
+X|789|0|2024-09-01 00:00:00.000|2026-02-09 00:00:00.000|1890565715.0
+Y|19|0|2024-09-02 00:00:00.000|2025-07-24 00:00:00.000|24439550.0
+Msg 207, Level 16, State 1, Server DESKTOP-CD8DCF5\SQLEXPRESS, Line 4
+Invalid column name 'UsedByUser'.
+=== Res_Facture vs its lines (Res_Fac_List) ===
+F_Code|F_Code_C|F_Date|F_Time|F_SumPrice|F_Takhfif|Bon_Price|Lines|SumLine|SumTakhfifSatri|SumDarsad
+------|--------|------|------|----------|---------|---------|-----|-------|---------------|---------
+590669|21168|2026-02-09 00:00:00|15:30|148500.0|0.0|0.0|1|148500.0|0.0|0.0
+590668|21167|2026-02-09 00:00:00|15:29|3750000.0|0.0|0.0|1|3750000.0|0.0|0.0
+590667|21166|2026-02-09 00:00:00|15:28|100000.0|0.0|0.0|1|100000.0|0.0|0.0
+590666|21165|2026-02-09 00:00:00|15:28|2900000.0|0.0|0.0|3|2900000.0|0.0|0.0
+590665|21164|2026-02-09 00:00:00|15:25|3141000.0|0.0|0.0|4|3141000.0|0.0|0.0
+590664|21163|2026-02-09 00:00:00|15:23|420000.0|0.0|0.0|1|420000.0|0.0|0.0
+590663|21162|2026-02-09 00:00:00|15:17|1220000.0|0.0|0.0|3|1220000.0|0.0|0.0
+590662|21161|2026-02-09 00:00:00|15:15|820000.0|0.0|0.0|2|820000.0|0.0|0.0
+590661|21160|2026-02-09 00:00:00|15:10|1800000.0|0.0|0.0|1|1800000.0|0.0|0.0
+590660|21159|2026-02-09 00:00:00|15:08|550000.0|0.0|0.0|1|550000.0|0.0|0.0
+590659|21158|2026-02-09 00:00:00|15:04|4530000.0|0.0|0.0|3|4530000.0|0.0|0.0
+590658|21157|2026-02-09 00:00:00|15:01|480000.0|0.0|0.0|1|480000.0|0.0|0.0
+590657|21156|2026-02-09 00:00:00|14:51|10442000.0|0.0|0.0|8|10442000.0|0.0|0.0
+590656|21155|2026-02-09 00:00:00|14:52|350000.0|0.0|0.0|2|350000.0|0.0|0.0
+590655|21154|2026-02-09 00:00:00|14:51|3950000.0|0.0|0.0|4|3950000.0|0.0|0.0
+=== Res_Fac_List columns ===
+name|TypeName
+----|--------
+F_Code|bigint
+FL_Index|smallint
+A_Code|char
+FL_Few|float
+FL_Price|float
+FL_Comment|nvarchar
+Levy|float
+Scot|float
+Darsad_Takhfif|float
+TakhfifSatrir|float
+Darsad_Type|bit
+Fl_Inc_Index|int
+Art_OuterOrd|bit
+FewKarton|float
+FewBasteh|float
+SumTakhfifSatri_P|float
+Sigar_Levy|float
+Sigar_Scot|float
+SelPriceID|int
+MinA_Name|nvarchar
+Unit_Code|int
+Unit_Few|float
+Buy_Price|float
+Vaseteh_Code|varchar
+darsadporsant|float
+RFID_Code|varchar
+RFID_UserCode|int
+=== Res_Fac_List sample for last invoices ===
+F_Code|FL_Index|A_Code|FL_Few|FL_Price|FL_Comment|Levy|Scot|Darsad_Takhfif|TakhfifSatrir|Darsad_Type|Fl_Inc_Index|Art_OuterOrd|FewKarton|FewBasteh|SumTakhfifSatri_P|Sigar_Levy|Sigar_Scot|SelPriceID|MinA_Name|Unit_Code|Unit_Few|Buy_Price|Vaseteh_Code|darsadporsant|RFID_Code|RFID_UserCode
+------|--------|------|------|--------|----------|----|----|--------------|-------------|-----------|------------|------------|---------|---------|-----------------|----------|----------|----------|---------|---------|--------|---------|------------|-------------|---------|-------------
+590669|1|0206447|0.14999999999999999|990000.0|ابي پويا|0.0|0.0|0.0|0.0|1|1881829|0|0.0|0.0|0.0|0.0|0.0|0|پودرنشاسته ذرت فله|0|1.0|492831.67892999999||0.0||0
+590668|1|0320203|1.0|3750000.0||0.0|0.0|0.0|0.0|1|1881828|0|0.0|0.0|0.0|0.0|0.0|0|شانسي دايناسور|0|1.0|2833333.6099999999||0.0||0
+590667|1|0303241|1.0|100000.0||0.0|0.0|0.0|0.0|1|1881827|0|0.0|0.0|0.0|0.0|0.0|0|آب معدني گراند0/5ل|0|1.0|49009.616759999997||0.0||0
+590666|1|0304058|1.0|900000.0|ابي پويا - س|0.0|0.0|0.0|0.0|1|1881824|0|0.0|0.0|0.0|0.0|0.0|0|دوغ پگاه گلپايگان2ل|0|1.0|797876.32999999996||0.0||0
+590666|2|0207434|10.0|90000.0|ابي پويا|0.0|0.0|0.0|0.0|1|1881825|0|0.0|0.0|0.0|0.0|0.0|0|تخم مرغ ؟|0|1.0|88373.424499999994||0.0||0
+590666|3|0305017|2.0|550000.0||0.0|0.0|0.0|0.0|1|1881826|0|0.0|0.0|0.0|0.0|0.0|0|نان لواش خانواده پوژگان|0|1.0|460000.0||0.0||0
+590665|1|0209149|1.0|270000.0|ابي پويا - س|0.0|0.0|0.0|0.0|1|1881820|0|0.0|0.0|0.0|0.0|0.0|0|عصاره برنج اليت 8ع|0|1.0|24637.20103||0.0||0
+590665|2|0201364|2.0|700000.0|ابي پويا - س
+20%|0.0|0.0|0.0|0.0|1|1881821|0|0.0|0.0|0.0|0.0|0.0|0|عصاره زعفران اليت 8ع|0|1.0|561404.76544999995||0.0||0
+590665|3|0206278|0.29499999999999998|3800000.0||0.0|0.0|0.0|0.0|1|1881822|0|0.0|0.0|0.0|0.0|0.0|0|زردچوبه فله|0|1.0|2864698.10268||0.0||0
+590665|4|0309252|1.0|350000.0|ابي پويا - س|0.0|0.0|0.0|0.0|1|1881823|0|0.0|0.0|0.0|0.0|0.0|0|نان روغني شکلاتي ليواني|0|1.0|270284.59999999998||0.0||0
+590664|1|0201538|1.0|420000.0|ابي پويا|0.0|0.0|0.0|0.0|1|1881819|0|0.0|0.0|0.0|0.0|0.0|0|نباتي قيچي چاوش|0|1.0|352877.58395||0.0||0
+590663|1|0207434|5.0|90000.0|ابي پويا|0.0|0.0|0.0|0.0|1|1881816|0|0.0|0.0|0.0|0.0|0.0|0|تخم مرغ ؟|0|1.0|88373.424499999994||0.0||0
+590663|2|0308395|1.0|160000.0|ابي پويا - س|0.0|0.0|0.0|0.0|1|1881817|0|0.0|0.0|0.0|0.0|0.0|0|نان لواش بسته اي|0|1.0|107500.00027||0.0||0
+590663|3|0304287|1.0|610000.0|ابي پويا - س
+قيمت جديد|0.0|0.0|0.0|0.0|1|1881818|0|0.0|0.0|0.0|0.0|0.0|0|ماست500گ پگاه پرچرب|0|1.0|509688.73638000002||0.0||0
+590662|1|0204422|1.0|720000.0|ابي پويا - س|0.0|0.0|0.0|0.0|1|1881814|0|0.0|0.0|0.0|0.0|0.0|0|نوار بهداشتي پنبه ريز لطيف و بزرگ|0|1.0|508384.70312999998||0.0||0
+590662|2|0311014|2.0|50000.0|ابي پويا|0.0|0.0|0.0|0.0|1|1881815|0|0.0|0.0|0.0|0.0|0.0|0|آدامس شيک 6 عددي|0|1.0|36206.261019999998||0.0||0
+590661|1|0207434|20.0|90000.0|ابي پويا|0.0|0.0|0.0|0.0|1|1881813|0|0.0|0.0|0.0|0.0|0.0|0|تخم مرغ ؟|0|1.0|88373.424499999994||0.0||0
+590660|1|0304065|1.0|550000.0|ابي پويا - س|0.0|0.0|0.0|0.0|1|1881812|0|0.0|0.0|0.0|0.0|0.0|0|دوغ گازدار آبعلي زمزم 1ل|0|1.0|478199.66999999998||0.0||0
+590659|1|0209900|1.0|940000.0|ابي پويا - س|0.0|0.0|0.0|0.0|1|1881809|0|0.0|0.0|0.0|0.0|0.0|0|شير پرچرب دامداران 946م|0|1.0|862584.74306000001||0.0||0
+590659|2|0212545|1.0|1800000.0|ابي پويا|0.0|0.0|0.0|0.0|1|1881810|0|0.0|0.0|0.0|0.0|0.0|0|ماست سطلي  کم چرب پلاس دامداران 2000 گرم|0|1.0|1213378.6128499999||0.0||0
+590659|3|0304034|1.0|1790000.0|ابي پويا - س|0.0|0.0|0.0|0.0|1|1881811|0|0.0|0.0|0.0|0.0|0.0|0|پنير خامه اي ويلي کاله 350گ|0|1.0|1598214.0||0.0||0
+590658|1|0313071|1.0|480000.0|ابي پويا - س|0.0|0.0|0.0|0.0|1|1881808|0|0.0|0.0|0.0|0.0|0.0|0|چيپس ذرت قهقهه پنيري 50گ|0|1.0|400000.0||0.0||0
+590657|1|0308459|1.0|470000.0|ابي پويا|0.0|0.0|0.0|0.0|1|1881800|0|0.0|0.0|0.0|0.0|0.0|0|ماکاروني 1/2 مانا 700گرمي|0|1.0|419530.54999999999||0.0||0
+590657|2|0308711|1.0|470000.0||0.0|0.0|0.0|0.0|1|1881801|0|0.0|0.0|0.0|0.0|0.0|0|ماکاروني1/6 مانا700 گرمي|0|1.0|419530.54999999999||0.0||0
+590657|3|0204173|2.0|358000.0|ابي پويا - س
+|0.0|0.0|0.0|0.0|1|1881802|0|0.0|0.0|0.0|0.0|0.0|0|پودر دستي بانو 500گ|0|1.0|298061.3052||0.0||0
+=== Triggers on POS / invoice tables ===
+TableName|TriggerName|is_disabled|is_instead_of_trigger
+---------|-----------|-----------|---------------------
+=== Modules mentioning Res_Facture or Rs_Facture ===
+type_desc|name
+---------|----
+SQL_STORED_PROCEDURE|sp_Res_ShowFacture_Fac_List
+SQL_STORED_PROCEDURE|sp_Res_ShowFacListAndOldTempTable_Temp
+VIEW|ArticlesExistInResturant
+SQL_STORED_PROCEDURE|DeleteCustomer
+VIEW|W_ShowArticleForSearch_Big
+SQL_STORED_PROCEDURE|sp_Res_Fac_List_OldTempTable
+SQL_STORED_PROCEDURE|sp_Res_FactureMaxF_Code_C
+SQL_STORED_PROCEDURE|sp_Res_FactureUpdate
+SQL_STORED_PROCEDURE|sp_Res_FactureAppend
+SQL_TABLE_VALUED_FUNCTION|F_ShowArticleForSearch_Big
+=== All stored procedures (names) ===
+name
+----
+CallerId_Append_Log
+CheckGeymatMiangin
+CheckGeymatTamamShodeh2
+ConvertDataForFreeSarfasl
+CreateTempAccessReport
+CreateTempArticleForAmalkardSanati
+CreateTempArticleKardex
+CreateTempBild
+CreateTempNegArtKardex
+CreateTempSelChkTable
+CreateTempVosoolTable
+CreateUpdateAvgPrice
+CurrentDate
+DeleteCustomer
+DeleteTempRecordInTolid
+dt_addtosourcecontrol
+dt_addtosourcecontrol_u
+dt_adduserobject
+dt_adduserobject_vcs
+dt_checkinobject
+dt_checkinobject_u
+dt_checkoutobject
+dt_checkoutobject_u
+dt_displayoaerror
+dt_displayoaerror_u
+dt_droppropertiesbyid
+dt_dropuserobjectbyid
+dt_generateansiname
+dt_getobjwithprop
+dt_getobjwithprop_u
+dt_getpropertiesbyid
+dt_getpropertiesbyid_u
+dt_getpropertiesbyid_vcs
+dt_getpropertiesbyid_vcs_u
+dt_isundersourcecontrol
+dt_isundersourcecontrol_u
+dt_removefromsourcecontrol
+dt_setpropertybyid
+dt_setpropertybyid_u
+dt_validateloginparams
+dt_validateloginparams_u
+dt_vcsenabled
+dt_verstamp006
+dt_verstamp007
+dt_whocheckedout
+dt_whocheckedout_u
+FillParentInSarfasl
+InsertInFactSpd
+InsertInFacture
+InsertInFactureCode
+InsertTempRecordInTolid
+InsertVasetTolidFactor
+MakeTarazTajmieeTbl
+MoveFactureCustomerExist
+RetMax
+Return_FewOfSath
+Return_Index
+RETURN_MAX_MGROUP
+RETURN_MAX_SGROUP
+Return_TempFileName
+Return_TempFileNamemyholoo
+ReturnFactCodeFromSefaresh
+ReturnLastIdentity
+rkitDeleteContract
+rKitDeleteContractCheques
+rkitDeleteContractForRent
+rkitEditContract
+rkitEditContractForRent
+rkitGetAllSellContract
+rKitGetContractChequesForRent
+rkitGetContractInformation
+rkitGetContractInformationForRent
+rkitGetLatestContractId
+rkitGetLatestContractIdForRent
+rkitGetPriorContractId
+rkitInsertContractChequesForRent
+rkitInsertNewContract
+rkitInsertNewContractForRent
+rkitValidateInsert
+rkitValidateInsertForRent
+SarfaslInsert
+ShowSanads
+sp_AnbaGardAndArticle
+sp_AnbarGard_TempTable
+Sp_AppendNewSanad
+Sp_ArtClassDiffrence
+Sp_ArticleAndGroups
+Sp_ArticleAndGroupsAndANBAGARD
+sp_Asnad_ShowTazmin_Customer_NewBank
+sp_Asnad_TazminAppend
+sp_Asnad_TazminDelete
+sp_Asnad_TazminUpdate
+sp_Barname
+sp_Barname_detail
+Sp_Calc_bedbes_MandehCust
+Sp_Createpropera_code
+SP_CreateRepCustomer1
+sp_CreateTempArtExst2
+Sp_CreateTempArtPrice
+sp_CreateTempFacture_FactArt
+sp_DependDateSanad
+sp_GarantyCard_MaxG_Code_C
+sp_GarantyCardAppend
+sp_GarantyCardDelete
+sp_GarantyCardUpdate
+sp_GetSumResSanadLine
+sp_HavFactureAppend
+sp_Hrd_Fac_ArtAppend
+sp_Hrd_Fac_ArtDelete
+sp_Hrd_Fac_ComAppend
+sp_Hrd_Fac_ComDelete
+sp_Hrd_FactureAppend
+sp_Hrd_FactureDelete
+sp_Hrd_FactureMaxF_Code_C
+sp_Hrd_FactureUpdate
+sp_Hrd_FCOUNECTAppend
+sp_Hrd_FCounectDelete
+sp_Hrd_Formul_ArtAppend
+sp_Hrd_Formul_ComAppend
+sp_Hrd_FormulCom_FormulArtDelete
+sp_Hrd_ShowFacArt_FacCom_Article
+sp_Hrd_ShowFacture_FacCom
+sp_Hrd_ShowFormulArt_Article_Unit
+sp_Hrd_ShowFormulCom
+sp_Hrd_ShowSelPrices
+SP_InsertArt
+sp_IsDiskOverLap
+sp_IsDocOverLap
+sp_Kh_CheckAppend
+sp_Kh_CheckDelete
+sp_Kh_CheckMaxBack_Number
+sp_Kh_DastgahDelete
+sp_Kh_DastgahInsert
+sp_Kh_DastgahMaxCodeC
+sp_Kh_DastgahTbl
+sp_Kh_DastgahUpdate
+sp_Kh_Fac_ListDelete
+sp_Kh_Fac_ListInsert
+sp_Kh_Facture_HazDelete
+sp_Kh_Facture_HazInsert
+sp_Kh_Facture_HazUpdate
+sp_Kh_Facture_UpdateF_Status2
+sp_Kh_FactureAppend
+sp_Kh_FactureDelete
+sp_Kh_FactureMaxF_Code_C
+sp_Kh_FactureMaxF_Code_C2
+sp_Kh_FactureUpdate
+sp_Kh_FactureUpdateF_Status
+sp_Kh_FactureUpdateF_Statuse
+sp_Kh_Gar_ListAppend
+sp_Kh_Gar_ListDelete
+sp_Kh_GarantyAndGarListDelete
+sp_Kh_GarantyAppend
+sp_Kh_GarantyMaxG_Code_C
+sp_Kh_GarantyUpdate
+sp_Kh_ShowAllTables
+sp_Kh_ShowCheckAndSND_INDX
+sp_Kh_ShowDastgahAndGarList
+sp_Kh_ShowFactureGarantyCustomerDastgah
+sp_Kh_ShowGar_List
+sp_Kh_ShowGaranty
+SP_KH_update_Facture
+sp_MoienAshkhas
+sp_MoienAshkhasMyHoloo
+sp_refresh_All_view
+sp_Res_DeleteMenuCategory
+sp_Res_Fac_List_Delete
+sp_Res_Fac_List_OldTempTable
+sp_Res_Fac_ListAppend
+sp_Res_FactureAppend
+sp_Res_FactureMaxF_Code_C
+sp_Res_FactureUpdate
+sp_Res_MenuArtAppend
+sp_Res_MenuArtDelete
+sp_Res_PeikAppend
+sp_Res_ShowFacListAndOldTempTable_Temp
+sp_Res_ShowFacture_Fac_List
+sp_Res_ShowMenuArt_Article_MenuCategory
+sp_ReSaveSanad
+sp_ReturnArtExistWithKardex
+sp_ReturnArtExistWithKardex1
+sp_SanadLinked
+sp_SaveProcess
+sp_Set_SarfaslApppend
+sp_ShowFacDetail
+sp_ShowFacDetailAndKhadamat
+sp_ShowFacDetailHaval
+sp_ShowFacTitr
+sp_ShowFacTitrHaval
+sp_ShowFCounectCustomer
+sp_ShowVasetF
+sp_StockReport
+Sp_SumFactureForCustomers
+Sp_UpdateCode_Class_Exist
+Sp_UpdateSindexInFactArt
+spMoienAshkhas
+stMandehOfSarfasl
+Stp_Sell_User
+stp_SetArticleExist2Valuet
+UpdateGeymatTamamShodeh
+UpdateGeymatTamamShodehAmaniDaryafti
+UpdateGeymatTamamShodehAmaniPardakhti
+UpdateGeymatTamamShodehInHavaleh
+UpdateGeymatTamamShodehTolid
+UpdateSndLineForBargashteAmani
+UpdateSndLineForBargashteAmanidaryafti
+VC_FactoreInsert
+VC_FactoreUpdate
+VC_FactureCloseReject
+VC_FactureReject

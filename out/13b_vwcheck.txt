@@ -1,0 +1,19 @@
+Changed database context to 'Holoo1'.
+=== BEFORE: does the view exist? ===
+ExistsBefore
+------------
+0
+=== smoke test inside transaction ===
+Source|InvoiceId|JalaliDate|TimeOfSale|CashierName|GrossTotal|DiscountAmount|NetTotal
+------|---------|----------|----------|-----------|----------|--------------|--------
+LIVE|590669|1404/11/20|15:30|Œ«‰„ «Ì„«‰Ì|148500.0|0.0|148500.0
+LIVE|590668|1404/11/20|15:29|Œ«‰„ «Ì„«‰Ì|3750000.0|0.0|3750000.0
+LIVE|590667|1404/11/20|15:28|Œ«‰„ «Ì„«‰Ì|100000.0|0.0|100000.0
+Source|Cnt|Net
+------|---|---
+LIVE|159|443659000.0
+ARCHIV|233175|389715357700.0
+=== AFTER ROLLBACK: view must be gone ===
+ExistsAfter
+-----------
+0
