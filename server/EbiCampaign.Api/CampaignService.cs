@@ -11,6 +11,8 @@ public sealed class CampaignOptions
     public DateOnly StartDate { get; init; } = new(2026, 1, 1);
     public decimal PointsPerAmountToman { get; init; } = 500000m;
     public string PointsBase { get; init; } = "gross";
+    /// <summary>عضویت کانال بله باید در زمان قرعه‌کشی بررسی شود (بند ۳.۲).</summary>
+    public bool RequireBaleMembership { get; init; } = true;
 }
 
 public sealed class CampaignService
@@ -946,17 +948,7 @@ FROM dbo.Rounds ORDER BY CASE WHEN Status='Collecting' THEN 0 ELSE 1 END, RoundN
         };
     }
 
-    private static async Task AuditAsync(SqlConnection cn, SqlTransaction tx, string actor, string action,
+    private static Task AuditAsync(SqlConnection cn, SqlTransaction tx, string actor, string action,
         string entity, string? entityId, object details, CancellationToken ct)
-    {
-        using SqlCommand cmd = new(@"
-INSERT INTO dbo.AuditLog(At, Actor, Action, Entity, EntityId, Details)
-VALUES(SYSUTCDATETIME(), @actor, @action, @entity, @id, @details);", cn, tx);
-        cmd.Parameters.AddWithValue("@actor", actor);
-        cmd.Parameters.AddWithValue("@action", action);
-        cmd.Parameters.AddWithValue("@entity", entity);
-        cmd.Parameters.AddWithValue("@id", (object?)entityId ?? DBNull.Value);
-        cmd.Parameters.AddWithValue("@details", JsonSerializer.Serialize(details, Json));
-        await cmd.ExecuteNonQueryAsync(ct);
-    }
+        => AuditWriter.WriteAsync(cn, tx, actor, action, entity, entityId, details, ct);
 }

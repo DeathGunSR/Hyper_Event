@@ -7,7 +7,12 @@ public static class ApiHost
 {
     private static readonly JsonSerializerOptions Json = CampaignService.Json;
 
-    public static WebApplication Build(string[] args, IDictionary<string, string?>? overrides = null)
+    /// <param name="configureServices">
+    /// جایگزینی اختیاری سرویس‌ها برای آزمون (مثلاً ارائه‌دهندهٔ عضویت بله).
+    /// در استقرار واقعی هیچ جایگزینی تزریق نمی‌شود.
+    /// </param>
+    public static WebApplication Build(string[] args, IDictionary<string, string?>? overrides = null,
+        Action<IServiceCollection>? configureServices = null)
     {
         WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
         if (overrides != null) builder.Configuration.AddInMemoryCollection(overrides);
@@ -27,16 +32,41 @@ public static class ApiHost
                     System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.None, out DateOnly d)
                     ? d : new DateOnly(2026, 1, 1),
                 PointsPerAmountToman = decimal.TryParse(cfg["Campaign:PointsPerAmountToman"], out decimal p) && p > 0 ? p : 500000m,
-                PointsBase = (cfg["Campaign:PointsBase"] ?? "gross").ToLowerInvariant()
+                PointsBase = (cfg["Campaign:PointsBase"] ?? "gross").ToLowerInvariant(),
+                RequireBaleMembership = !bool.TryParse(cfg["Campaign:RequireBaleMembership"], out bool rb) || rb
             };
             return opt;
         });
         builder.Services.AddSingleton<CampaignService>();
+        builder.Services.AddSingleton<ReviewDecisionService>();
+        // پیش‌فرض: هیچ اتصال بله‌ای پیکربندی نشده است؛ سرویس جایگزین فقط برای آزمون تزریق می‌شود.
+        builder.Services.AddSingleton<IBaleMembershipProvider, UnconfiguredBaleProvider>();
+        builder.Services.AddSingleton<LotteryService>();
+        configureServices?.Invoke(builder.Services);
 
         WebApplication app = builder.Build();
         app.Use(ErrorMiddleware);
 
         // ---------------- عمومی ----------------
+        /// <summary>زیست‌سنجی سبک بدون دست‌زدن به دیتابیس؛ مناسب کاوشگر بار متعادل‌کننده.</summary>
+        app.MapGet("/livez", () => Results.Json(new { ok = true }, Json));
+
+        /// <summary>آمادگی وابستگی‌ها؛ وقتی دیتابیس در دسترس نباشد 503 می‌دهد.</summary>
+        app.MapGet("/readyz", async (Db db) =>
+        {
+            try
+            {
+                await using SqlConnection cn = await db.OpenAsync();
+                using SqlCommand cmd = new("SELECT 1", cn);
+                await cmd.ExecuteScalarAsync();
+                return Results.Json(new { ok = true }, Json);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(new { ok = false, error = ex.GetType().Name }, Json, statusCode: 503);
+            }
+        });
+
         app.MapGet("/health", async (Db db) =>
         {
             try
@@ -138,6 +168,91 @@ public static class ApiHost
             string? status = ctx.Request.Query["status"];
             int limit = int.TryParse(ctx.Request.Query["limit"], out int l) ? l : 200;
             return Results.Json(await svc.GetInvoicesAsync(roundId, status, limit, ctx.RequestAborted), Json);
+        });
+
+        // ---------------- مسیر تصمیم مدیر (بند ۴.۲) ----------------
+        app.MapGet("/api/v1/admin/invoices/{id:long}/detail", async (HttpContext ctx, long id, ReviewDecisionService svc) =>
+        {
+            RequireAdmin(ctx);
+            return Results.Json(await svc.GetInvoiceDetailAsync(id, ctx.RequestAborted), Json);
+        });
+
+        app.MapPost("/api/v1/admin/invoices/{id:long}/decision", async (HttpContext ctx, long id, ReviewDecisionService svc) =>
+        {
+            RequireAdmin(ctx);
+            DecisionRequest? req = await ReadOptionalJsonAsync<DecisionRequest>(ctx);
+            if (req == null) throw new ApiException(400, "body_required", "بدنهٔ درخواست الزامی است.");
+            if (string.IsNullOrWhiteSpace(req.Actor)) req.Actor = ActorOf(ctx);
+            DecisionResult res = await svc.DecideAsync(id, req, req.Actor!, ctx.RequestAborted);
+            return Results.Json(res, Json);
+        });
+
+        // ---------------- موتور قرعه‌کشی (بند ۵) ----------------
+        app.MapPost("/api/v1/admin/rounds/{id:int}/lottery", async (HttpContext ctx, int id, LotteryService svc) =>
+        {
+            RequireAdmin(ctx);
+            PrepareLotteryRequest? req = await ReadOptionalJsonAsync<PrepareLotteryRequest>(ctx);
+            LotteryRunInfo run = await svc.PrepareAsync(id, req?.AcknowledgeReviews ?? false,
+                req?.Actor ?? ActorOf(ctx), ctx.RequestAborted);
+            return Results.Json(run, Json);
+        });
+
+        app.MapGet("/api/v1/admin/lottery", async (HttpContext ctx, LotteryService svc) =>
+        {
+            RequireAdmin(ctx);
+            int limit = int.TryParse(ctx.Request.Query["limit"], out int l) ? l : 50;
+            return Results.Json(await svc.ListRunsAsync(limit, ctx.RequestAborted), Json);
+        });
+
+        app.MapGet("/api/v1/admin/lottery/{id:int}", async (HttpContext ctx, int id, LotteryService svc) =>
+        {
+            RequireAdmin(ctx);
+            bool entries = !string.Equals(ctx.Request.Query["entries"], "false", StringComparison.OrdinalIgnoreCase);
+            return Results.Json(await svc.GetRunAsync(id, entries, ctx.RequestAborted), Json);
+        });
+
+        app.MapPost("/api/v1/admin/lottery/{id:int}/select", async (HttpContext ctx, int id, LotteryService svc) =>
+        {
+            RequireAdmin(ctx);
+            AdminActionRequest? req = await ReadOptionalJsonAsync<AdminActionRequest>(ctx);
+            return Results.Json(await svc.SelectAsync(id, req?.Actor ?? ActorOf(ctx), ctx.RequestAborted), Json);
+        });
+
+        app.MapPost("/api/v1/admin/lottery/{id:int}/finalize", async (HttpContext ctx, int id, LotteryService svc) =>
+        {
+            RequireAdmin(ctx);
+            AdminActionRequest? req = await ReadOptionalJsonAsync<AdminActionRequest>(ctx);
+            return Results.Json(await svc.FinalizeAsync(id, req?.Actor ?? ActorOf(ctx), ctx.RequestAborted), Json);
+        });
+
+        app.MapPost("/api/v1/admin/lottery/{id:int}/abort", async (HttpContext ctx, int id, LotteryService svc) =>
+        {
+            RequireAdmin(ctx);
+            VoidRequest? req = await ReadOptionalJsonAsync<VoidRequest>(ctx);
+            if (req == null) throw new ApiException(400, "body_required", "بدنهٔ درخواست الزامی است.");
+            return Results.Json(await svc.AbortAsync(id, req.Reason ?? "", req.Actor ?? ActorOf(ctx),
+                ctx.RequestAborted), Json);
+        });
+
+        app.MapGet("/api/v1/admin/lottery/{id:int}/receipt", async (HttpContext ctx, int id, LotteryService svc) =>
+        {
+            RequireAdmin(ctx);
+            return Results.Json(await svc.ReceiptAsync(id, ctx.RequestAborted), Json);
+        });
+
+        app.MapGet("/api/v1/admin/lottery/{id:int}/verify", async (HttpContext ctx, int id, LotteryService svc) =>
+        {
+            RequireAdmin(ctx);
+            return Results.Json(await svc.VerifyAsync(id, ctx.RequestAborted), Json);
+        });
+
+        /// <summary>
+        /// شمارهٔ کامل برنده برای تماس/ارسال جایزه؛ هر دسترسی در AuditLog ثبت می‌شود.
+        /// </summary>
+        app.MapGet("/api/v1/admin/lottery/{id:int}/winner-contact", async (HttpContext ctx, int id, LotteryService svc) =>
+        {
+            string actor = RequireAdmin(ctx);
+            return Results.Json(await svc.WinnerContactAsync(id, actor, ctx.RequestAborted), Json);
         });
 
         return app;

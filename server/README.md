@@ -1,7 +1,10 @@
-# EbiCampaign API — هستهٔ کمپین (فاز ۱)
+# EbiCampaign API — هستهٔ کمپین (فاز ۱ و ۲)
 
 سرویس مرکزی ثبت فاکتورهای معتبر فروشگاه، جلوگیری از شمارش تکراری و مدیریت دوره‌های ۱۰۰۰ فاکتوری.
 این سرویس **هیچ ارتباطی با دیتابیس هلو ندارد**؛ فقط درخواست‌های امضاشدهٔ عامل‌های صندوق را می‌پذیرد.
+
+مستندهای فاز ۲:
+[گزارش فاز ۲](docs/PHASE2-REPORT.fa.md) · [آمادگی زیرساخت](docs/PHASE2-INFRA.fa.md)
 
 ## پیش‌نیازها
 
@@ -41,7 +44,9 @@ dotnet run --project EbiCampaign.Api
 بررسی سلامت:
 
 ```bash
-curl http://127.0.0.1:5080/health
+curl http://127.0.0.1:5080/livez    # زیست سرویس، بدون دیتابیس (برای کاوشگر لبه)
+curl http://127.0.0.1:5080/readyz   # آمادگی وابستگی (دیتابیس)
+curl http://127.0.0.1:5080/health   # سلامت تفصیلی + دورهٔ جاری (ابزار تشخیص انسانی)
 ```
 
 ## پیکربندی
@@ -56,15 +61,20 @@ curl http://127.0.0.1:5080/health
 | `Campaign:PointsPerAmountToman` | `500000` | هر چند تومان خرید = ۱ امتیاز |
 | `Campaign:PointsBase` | `gross` | `gross` یا `net` |
 | `Campaign:AutoCreateDatabase` | `true` | فقط برای توسعه؛ در تولید `false` و دیتابیس از پیش ساخته شود |
+| `Campaign:RequireBaleMembership` | `true` | الزام عضویت کانال بله در زمان قرعه‌کشی |
 | `Auth:AdminKey` | خالی | خالی = مسیرهای مدیر غیرفعال (503) |
 | `Auth:Agents:<agentId>` | — | کلید HMAC هر صندوق |
 
 مهاجرت‌ها هنگام شروع به‌صورت خودکار و نسخه‌دار روی دیتابیس کمپین اجرا می‌شوند (`dbo.SchemaVersions`).
+نسخه‌های ۳ و ۴ (`003_decisions.sql`، `004_lottery.sql`) جدول‌های تصمیم مدیر و قرعه‌کشی را می‌سازند و
+افزایشی‌اند؛ روی دیتابیس فاز ۱ بدون از دست رفتن داده اجرا می‌شوند.
 
 ## مسیرها
 
 | متد | مسیر | احراز هویت | کار |
 |---|---|---|---|
+| GET | `/livez` | عمومی | زیست سرویس بدون دیتابیس |
+| GET | `/readyz` | عمومی | آمادگی وابستگی (دیتابیس) |
 | GET | `/health` | عمومی | سلامت + نسخهٔ اسکیما + دورهٔ جاری |
 | POST | `/api/v1/ingest/invoices` | HMAC عامل | ثبت دستهٔ فاکتور (۱ تا ۵۰۰) |
 | GET | `/api/v1/rounds/current` | HMAC عامل | شمارندهٔ دورهٔ جاری |
@@ -76,6 +86,17 @@ curl http://127.0.0.1:5080/health
 | GET | `/api/v1/admin/invoices` | `X-Admin-Key` | فهرست فاکتورها (فیلتر دوره/وضعیت) |
 | POST | `/api/v1/admin/invoices/{id}/void` | `X-Admin-Key` | ابطال با دلیل |
 | POST | `/api/v1/admin/invoices/{id}/revalidate` | `X-Admin-Key` | تأیید فاکتور NeedsReview (دورهٔ باز یا Held) |
+| GET | `/api/v1/admin/invoices/{id}/detail` | `X-Admin-Key` | فاکتور + تاریخچهٔ تصمیم‌ها + وضعیت نتیجهٔ دوره |
+| POST | `/api/v1/admin/invoices/{id}/decision` | `X-Admin-Key` | تصمیم مدیر: `valid` یا `void` با دلیل، `decisionKey` و `force` |
+| POST | `/api/v1/admin/rounds/{id}/lottery` | `X-Admin-Key` | تثبیت مجموعهٔ ورودی‌ها و تعهد هش |
+| GET | `/api/v1/admin/lottery` | `X-Admin-Key` | فهرست فراگرفت‌های قرعه‌کشی |
+| GET | `/api/v1/admin/lottery/{id}` | `X-Admin-Key` | جزئیات فراگرفت و ورودی‌ها (`?entries=false`) |
+| POST | `/api/v1/admin/lottery/{id}/select` | `X-Admin-Key` | انتخاب وزنی برنده و افشای Seed |
+| POST | `/api/v1/admin/lottery/{id}/finalize` | `X-Admin-Key` | نهایی‌سازی نتیجه |
+| POST | `/api/v1/admin/lottery/{id}/abort` | `X-Admin-Key` | لغو فراگرفت پیش از انتخاب (با دلیل) |
+| GET | `/api/v1/admin/lottery/{id}/receipt` | `X-Admin-Key` | سند حسابرسی + فرمول‌های بازتولید |
+| GET | `/api/v1/admin/lottery/{id}/verify` | `X-Admin-Key` | بازمحاسبهٔ هش مجموعه، تعهد و برنده |
+| GET | `/api/v1/admin/lottery/{id}/winner-contact` | `X-Admin-Key` | شمارهٔ کامل برنده (ثبت‌شده در AuditLog) |
 
 ### قرارداد ثبت فاکتور
 
@@ -126,14 +147,28 @@ signature = HMAC_SHA256(agentSecret, canonical)  // hex
 `requestId` کلید ایدمپوتنسی است: ارسال دوبارهٔ همان شناسه و همان بدنه، پاسخ ذخیره‌شده را برمی‌گرداند؛
 همان شناسه با بدنهٔ متفاوت `409` می‌گیرد.
 
+## گردش‌کار قرعه‌کشی (بند ۵)
+
+۱. دوره با رسیدن به `Target` خودکار `Completed` می‌شود (شمارش فقط فاکتور `Valid`).
+۲. `POST /admin/rounds/{id}/lottery` مجموعهٔ ورودی‌ها را تثبیت می‌کند، عضویت بله را بررسی می‌کند و
+   `CommitmentHash` را منتشر می‌سازد. تا این مرحله `seedHex` در پاسخ `null` است.
+۳. `POST /admin/lottery/{id}/select` برنده را با CSPRNG و وزن امتیازی انتخاب می‌کند و Seed را افشا می‌کند.
+۴. `GET /admin/lottery/{id}/verify` باید هر سه بررسی را سبز نشان دهد: `entriesHashMatches`،
+   `commitmentMatches`، `winnerReproduces`. هر ممیز بیرونی هم می‌تواند با `receipt` همین را بازتولید کند.
+۵. `POST /admin/lottery/{id}/finalize` نتیجه را رسمی می‌کند. پس از آن، هر تغییر وضعیت فاکتور آن دوره
+   فقط با مسیر ویژهٔ `decision` و `force=true` + دلیل مکتوب ممکن است و فراگرفت برای بازبینی علامت می‌خورد.
+
 ## آزمون
 
 ```bash
 # از ریشهٔ server
-dotnet run --project EbiCampaign.Tests
+dotnet run --project EbiCampaign.Tests                 # ۱۹۰ بررسی (۷۸ فاز ۱ + ۱۱۲ فاز ۲)
+EBI_LOAD=800x32 dotnet run --project EbiCampaign.Tests # آزمون بار: ۸۰۰ ارسال با همزمانی ۳۲
 ```
 
-آزمون‌ها دیتابیس موقت `EbiCampaign_Test` را می‌سازند، ۷۸ بررسی را اجرا می‌کنند و در پایان آن را حذف می‌کنند.
+آزمون‌ها دیتابیس موقت `EbiCampaign_Test` را می‌سازند، همهٔ بررسی‌ها را اجرا می‌کنند و در پایان آن را حذف
+می‌کنند. آزمون قرعه‌کشی با ارائه‌دهندهٔ جعلی عضویت بله تزریق‌شده اجرا می‌شود (`configureServices` در
+آزمون) و هیچ ارتباط شبکه‌ای با بله ندارد.
 اگر SQL Express در نام نمونهٔ دیگری است، `MasterCs`/`DbName` در `EbiCampaign.Tests/Program.cs` را تنظیم کنید.
 
 ## چک‌لیست تولید
@@ -142,8 +177,10 @@ dotnet run --project EbiCampaign.Tests
 - [ ] TLS واقعی (reverse proxy) و بستن پورت مستقیم روی اینترنت.
 - [ ] `Campaign:AutoCreateDatabase=false` و کاربر دیتابیس با حداقل مجوز.
 - [ ] پشتیبان‌گیری دوره‌ای از دیتابیس کمپین + نگهداری/پاک‌سازی `IngestRequests` و `AuditLog`.
-- [ ] پایش `/health`، صف ارسال صندوق‌ها و تعداد `Held`.
-- [ ] سیاست ابطال و بازهٔ تطبیق روزانه مکتوب شود (فاز ۲).
+- [ ] پایش `/livez` و `/readyz` (و `/health` به‌صورت دوره‌ای)، صف ارسال صندوق‌ها و تعداد `Held`.
+- [ ] `Max Pool Size` مخزن اتصال متناسب با ظرفیت SQL و تعداد نمونه‌ها.
+- [ ] سیاست ابطال و بازهٔ تطبیق روزانه مکتوب شود (بند ۴.۱ انجام شد؛ تصمیم سیاست انتظار بند ۳.۳ باز است).
+- [ ] پشتیبان‌گیری و **آزمون بازیابی** انجام و مستند شود.
 - [ ] رمز/توکن پیامک و بله فقط در متغیر محیطی یا مخزن راز، نه در فایل پروژه.
 
 ## محدودیت‌های شناخته‌شده
@@ -152,4 +189,5 @@ dotnet run --project EbiCampaign.Tests
 - تطبیق ابطال در برنامهٔ صندوق فقط برای «روز کاری جاری» اجرا می‌شود؛ ابطال روزهای گذشته با مسیر `void` مدیر انجام می‌شود.
 - بازگشت از `NeedsReview` به `Valid` خودکار نیست و فقط با مسیر `revalidate` و تصمیم مدیر انجام می‌شود.
 - محدودیت نرخ درخواست و WAF در این فاز پیاده نشده است.
+- آزمون بازیابی پشتیبان روی محیط کنار انجام نشده است.
 - امتیازها در سرور با `PointsPerAmountToman` محاسبه می‌شوند؛ این مقدار باید با تنظیمات صندوق هم‌خوان باشد.
