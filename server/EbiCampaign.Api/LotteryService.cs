@@ -97,6 +97,7 @@ public sealed class LotteryService
                     "مجموعهٔ فاکتورهای دوره حین تثبیت تغییر کرد؛ لطفاً بلافاصله دوباره تلاش کنید.");
 
             List<string> lines = new();
+            List<string> publicLines = new();
             int entryNo = 0;
             int unknown = 0;
             foreach (EntryDraft d in drafts)
@@ -107,10 +108,14 @@ public sealed class LotteryService
                 if (string.Equals(d.Bale?.Code, "unknown", StringComparison.Ordinal)) unknown++;
                 lines.Add(LotteryEngine.EntryLine(d.EntryNo, d.InvoiceId, d.FCode, d.Mobile, d.Points,
                     d.Eligibility, d.Bale?.Code));
+                publicLines.Add(LotteryEngine.PublicEntryLine(d.EntryNo,
+                    LotteryEngine.Pseudonym(seedHex, d.EntryNo), d.Eligibility, d.Weight));
             }
 
             string entriesHash = LotteryEngine.EntriesHash(lines);
-            string commitment = LotteryEngine.Commitment(round.RoundNo, entriesHash, seedHex);
+            string publicEntriesHash = LotteryEngine.PublicEntriesHash(publicLines);
+            // تعهد به هش عمومی گره می‌خورد تا ممیز مستقل بدون دادهٔ خصوصی آن را بازتولید کند.
+            string commitment = LotteryEngine.Commitment(round.RoundNo, publicEntriesHash, seedHex);
             int eligibleCount = drafts.Count(x => x.Eligibility == "eligible");
             long totalWeight = drafts.Sum(x => x.Weight);
 
@@ -135,14 +140,16 @@ public sealed class LotteryService
             try
             {
                 using SqlCommand ins = new(@"
-INSERT INTO dbo.LotteryRuns(RoundId, Status, Algorithm, EntriesHash, EntryCount, EligibleCount, TotalWeight,
-    CommitmentHash, SeedHex, AcknowledgedReviews, ReviewReason, PreparedBy, PreparedAt)
-VALUES(@rid, @status, @algo, @hash, @n, @eligible, @total, @commitment, @seed, @ack, @reason, @actor, SYSUTCDATETIME());
+INSERT INTO dbo.LotteryRuns(RoundId, Status, Algorithm, EntriesHash, PublicEntriesHash, EntryCount, EligibleCount,
+    TotalWeight, CommitmentHash, SeedHex, AcknowledgedReviews, ReviewReason, PreparedBy, PreparedAt)
+VALUES(@rid, @status, @algo, @hash, @publichash, @n, @eligible, @total, @commitment, @seed, @ack, @reason, @actor,
+       SYSUTCDATETIME());
 SELECT CAST(SCOPE_IDENTITY() AS INT);", wcn, tx);
                 ins.Parameters.AddWithValue("@rid", roundId);
                 ins.Parameters.AddWithValue("@status", status);
                 ins.Parameters.AddWithValue("@algo", LotteryEngine.Algorithm);
                 ins.Parameters.AddWithValue("@hash", entriesHash);
+                ins.Parameters.AddWithValue("@publichash", publicEntriesHash);
                 ins.Parameters.AddWithValue("@n", drafts.Count);
                 ins.Parameters.AddWithValue("@eligible", eligibleCount);
                 ins.Parameters.AddWithValue("@total", totalWeight);
@@ -168,7 +175,7 @@ SELECT CAST(SCOPE_IDENTITY() AS INT);", wcn, tx);
                 new
                 {
                     roundId, roundNo = round.RoundNo, runId, status, entries = drafts.Count,
-                    eligibleCount, totalWeight, entriesHash, commitment,
+                    eligibleCount, totalWeight, entriesHash, publicEntriesHash, commitment,
                     acknowledgedReviews = acknowledgeReviews ? unresolvedReviews : 0, reviewReason,
                     baleProvider = _bale.Name
                 }, ct);
@@ -237,7 +244,7 @@ UPDATE dbo.LotteryRuns SET Status='RequiresReview', ReviewReason='zero_total_wei
 
             byte[] seed = Convert.FromHexString(run.FullSeedHex
                 ?? throw new ApiException(500, "seed_missing", "Seed تثبیت‌شدهٔ این فراگرفت پیدا نشد."));
-            string context = LotteryEngine.Context(run.RoundNo, run.EntriesHash);
+            string context = LotteryEngine.Context(run.RoundNo, PublicHashOf(run));
             int index = LotteryEngine.PickWeighted(seed, context, eligible.Select(x => x.Weight).ToList(),
                 out long draw, out long total);
             WeightedEntry winner = eligible[index];
@@ -278,7 +285,8 @@ WHERE RunId=@id AND Status='Committed';", cn, tx))
                 new
                 {
                     runId, roundId = run.RoundId, roundNo = run.RoundNo, algorithm = LotteryEngine.Algorithm,
-                    entriesHash = run.EntriesHash, commitment = run.CommitmentHash, seed = run.FullSeedHex,
+                    entriesHash = run.EntriesHash, publicEntriesHash = PublicHashOf(run),
+                    commitment = run.CommitmentHash, seed = run.FullSeedHex,
                     eligibleCount = eligible.Count, totalWeight = total, draw,
                     winnerEntryNo = winner.EntryNo, winnerInvoiceId = winner.InvoiceId, winnerFCode = winner.FCode,
                     winnerPoints = winner.Points
@@ -336,7 +344,8 @@ WHERE RunId=@id AND Status='Selected';", cn, tx))
                 new
                 {
                     runId, roundId = run.RoundId, winnerFCode = run.WinnerFCode, winnerEntryNo = run.WinnerEntryNo,
-                    entriesHash = run.EntriesHash, commitment = run.CommitmentHash, seed = run.FullSeedHex
+                    entriesHash = run.EntriesHash, publicEntriesHash = PublicHashOf(run),
+                    commitment = run.CommitmentHash, seed = run.FullSeedHex
                 }, ct);
             await tx.CommitAsync(ct);
             await using SqlConnection rcn = await _db.OpenAsync(ct);
@@ -466,7 +475,7 @@ ORDER BY r.RunId DESC;", cn);
         LotteryRunInfo run = await ReadRunAsync(cn, runId, true, ct)
             ?? throw new ApiException(404, "run_not_found", "فراگرفت قرعه‌کشی پیدا نشد.");
 
-        // بازسازی هش باید با دادهٔ کامل Snapshot انجام شود؛ شمارهٔ موبایل نقشی در هش دارد
+        // بازسازی هش داخلی باید با دادهٔ کامل Snapshot انجام شود؛ شمارهٔ موبایل نقشی در هش دارد
         // و در پاسخ API پوشانده می‌شود، بنابراین اینجا مستقیم از پایگاه داده خوانده می‌شود.
         List<RawEntry> raw = await ReadRawEntriesAsync(cn, runId, ct);
         List<string> lines = raw
@@ -478,13 +487,21 @@ ORDER BY r.RunId DESC;", cn);
 
         bool commitmentMatch = false;
         bool winnerReproduces = false;
+        bool publicHashMatch = false;
         long? recomputedFCode = null;
         int? recomputedEntry = null;
+        string? publicHash = run.PublicEntriesHash;
 
         if (!string.IsNullOrEmpty(run.SeedHex))
         {
+            // هش عمومی از همان ورودی‌ها با شناسهٔ مستعار بازسازی می‌شود؛ پس از افشای Seed
+            // هر ممیز بیرونی هم می‌تواند همین کار را با دادهٔ عمومی انجام دهد.
+            string recomputedPublicHash = PublicEntriesHashOf(seedHex: run.SeedHex, raw);
+            if (string.IsNullOrEmpty(publicHash)) publicHash = recomputedPublicHash;
+            publicHashMatch = string.Equals(recomputedPublicHash, publicHash, StringComparison.Ordinal);
+
             commitmentMatch = string.Equals(
-                LotteryEngine.Commitment(run.RoundNo, run.EntriesHash, run.SeedHex), run.CommitmentHash,
+                LotteryEngine.Commitment(run.RoundNo, publicHash, run.SeedHex), run.CommitmentHash,
                 StringComparison.Ordinal);
 
             List<WeightedEntry> eligible = raw
@@ -500,7 +517,7 @@ ORDER BY r.RunId DESC;", cn);
             if (eligible.Count > 0 && eligible.Sum(x => x.Weight) > 0)
             {
                 byte[] seed = Convert.FromHexString(run.SeedHex);
-                string context = LotteryEngine.Context(run.RoundNo, run.EntriesHash);
+                string context = LotteryEngine.Context(run.RoundNo, publicHash!);
                 int index = LotteryEngine.PickWeighted(seed, context, eligible.Select(x => x.Weight).ToList(),
                     out _, out _);
                 recomputedFCode = eligible[index].FCode;
@@ -517,13 +534,296 @@ ORDER BY r.RunId DESC;", cn);
             Algorithm = LotteryEngine.Algorithm,
             SeedRevealed = run.Status == "Selected" || run.Status == "Finalized",
             EntriesHashMatches = entriesMatch,
+            PublicEntriesHash = publicHash,
+            PublicEntriesHashMatches = publicHashMatch,
             CommitmentMatches = commitmentMatch,
             WinnerReproduces = winnerReproduces,
             ExpectedWinnerFCode = run.WinnerFCode,
             RecomputedWinnerFCode = recomputedFCode,
             RecomputedEntryNo = recomputedEntry,
-            Note = "اگر تعهد یا هش مطابقت نداشت، مجموعه یا Seed پس از تثبیت تغییر کرده است و نتیجه بی‌اعتبار می‌شود."
+            Note = publicHashMatch
+                ? "هش عمومی، تعهد و برنده از دادهٔ تثبیت‌شده بازتولید شدند."
+                : (string.IsNullOrEmpty(run.SeedHex)
+                    ? "تا افشای Seed پس از انتخاب، بازتولید هش عمومی ممکن نیست."
+                    : "اگر تعهد یا هش مطابقت نداشت، مجموعه یا Seed پس از تثبیت تغییر کرده است و نتیجه بی‌اعتبار می‌شود.")
         };
+    }
+
+    // ------------------------------------------------------------------
+    //  انتشار عمومی نتیجه (فقط با تأیید صریح مدیر)
+    // ------------------------------------------------------------------
+    /// <summary>
+    /// تأیید انتشار عمومی نتیجه: تا این لحظه هیچ خروجی عمومی برنده را نشان نمی‌دهد.
+    /// نام نمایشی، تصویر و وضعیت تأیید تصویر همراه همین اقدام ثبت می‌شوند.
+    /// </summary>
+    public async Task<LotteryRunInfo> PublishAsync(int runId, string displayName, string? imageUrl,
+        bool imageApproved, string actor, CancellationToken ct = default)
+    {
+        actor = CleanActor(actor);
+        displayName = Trim(displayName, 60);
+        string? image = ValidateImageUrl(imageUrl);
+
+        await using SqlConnection cn = await _db.OpenAsync(ct);
+        await using SqlTransaction tx = (SqlTransaction)await cn.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        try
+        {
+            LotteryRunInfo run = await ReadRunAsync(cn, tx, runId, false, ct)
+                ?? throw new ApiException(404, "run_not_found", "فراگرفت قرعه‌کشی پیدا نشد.");
+            if (run.Status != "Finalized")
+                throw new ApiException(409, "run_not_finalized",
+                    "فقط نتیجهٔ نهایی‌شده قابل انتشار عمومی است.");
+            if (run.WinnerFCode == null)
+                throw new ApiException(409, "no_winner", "این فراگرفت برندهٔ ثبت‌شده ندارد.");
+
+            using (SqlCommand upd = new(@"
+UPDATE dbo.LotteryRuns SET PublishApproved=1, PublishApprovedBy=@actor, PublishApprovedAt=SYSUTCDATETIME(),
+    PublishedDisplayName=@name,
+    WinnerImageUrl = CASE WHEN @hasImg = 1 THEN @img ELSE WinnerImageUrl END,
+    WinnerImageApproved = CASE WHEN @hasImg = 1 THEN @imgOk ELSE WinnerImageApproved END,
+    WinnerImageUpdatedAt = CASE WHEN @hasImg = 1 THEN SYSUTCDATETIME() ELSE WinnerImageUpdatedAt END
+WHERE RunId=@id;", cn, tx))
+            {
+                upd.Parameters.AddWithValue("@actor", actor);
+                upd.Parameters.AddWithValue("@name", displayName.Length == 0 ? (object)DBNull.Value : displayName);
+                upd.Parameters.AddWithValue("@hasImg", image != null ? 1 : 0);
+                upd.Parameters.AddWithValue("@img", (object?)image ?? DBNull.Value);
+                upd.Parameters.AddWithValue("@imgOk", image != null && imageApproved ? 1 : 0);
+                upd.Parameters.AddWithValue("@id", runId);
+                await upd.ExecuteNonQueryAsync(ct);
+            }
+
+            await AuditWriter.WriteAsync(cn, tx, actor, "lottery.publish", "LotteryRun", runId.ToString(),
+                new { runId, roundId = run.RoundId, displayName, imageUrl = image, imageApproved = image != null && imageApproved },
+                ct);
+            await tx.CommitAsync(ct);
+
+            _log.LogInformation("lottery publish run={RunId} actor={Actor} image={Image}", runId, actor, image != null);
+            await using SqlConnection rcn = await _db.OpenAsync(ct);
+            return (await ReadRunAsync(rcn, runId, false, ct))!;
+        }
+        catch (ApiException)
+        {
+            try { await tx.RollbackAsync(ct); } catch { }
+            throw;
+        }
+        catch
+        {
+            try { await tx.RollbackAsync(ct); } catch { }
+            throw;
+        }
+    }
+
+    /// <summary>لغو انتشار عمومی؛ نتیجه در سرویس مرکزی حفظ می‌شود ولی دیگر در سایت دیده نمی‌شود.</summary>
+    public async Task<LotteryRunInfo> UnpublishAsync(int runId, string reason, string actor,
+        CancellationToken ct = default)
+    {
+        actor = CleanActor(actor);
+        reason = Trim(reason, 200);
+        if (reason.Length == 0)
+            throw new ApiException(400, "reason_required", "دلیل لغو انتشار الزامی است.");
+
+        await using SqlConnection cn = await _db.OpenAsync(ct);
+        await using SqlTransaction tx = (SqlTransaction)await cn.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        try
+        {
+            LotteryRunInfo run = await ReadRunAsync(cn, tx, runId, false, ct)
+                ?? throw new ApiException(404, "run_not_found", "فراگرفت قرعه‌کشی پیدا نشد.");
+
+            using (SqlCommand upd = new(@"
+UPDATE dbo.LotteryRuns SET PublishApproved=0, PublishApprovedBy=@actor, PublishApprovedAt=SYSUTCDATETIME()
+WHERE RunId=@id;", cn, tx))
+            {
+                upd.Parameters.AddWithValue("@actor", actor);
+                upd.Parameters.AddWithValue("@id", runId);
+                await upd.ExecuteNonQueryAsync(ct);
+            }
+
+            await AuditWriter.WriteAsync(cn, tx, actor, "lottery.unpublish", "LotteryRun", runId.ToString(),
+                new { runId, roundId = run.RoundId, reason }, ct);
+            await tx.CommitAsync(ct);
+            await using SqlConnection rcn = await _db.OpenAsync(ct);
+            return (await ReadRunAsync(rcn, runId, false, ct))!;
+        }
+        catch (ApiException)
+        {
+            try { await tx.RollbackAsync(ct); } catch { }
+            throw;
+        }
+        catch
+        {
+            try { await tx.RollbackAsync(ct); } catch { }
+            throw;
+        }
+    }
+
+    /// <summary>ثبت/جایگزینی/حذف تصویر برنده و وضعیت تأیید انتشار آن.</summary>
+    public async Task<LotteryRunInfo> SetWinnerImageAsync(int runId, string? imageUrl, bool approved,
+        string actor, CancellationToken ct = default)
+    {
+        actor = CleanActor(actor);
+        string? image = ValidateImageUrl(imageUrl);
+        if (image != null && !approved)
+            throw new ApiException(400, "image_consent_required",
+                "انتشار تصویر برنده نیازمند تأیید صریح (approved=true) است.");
+
+        await using SqlConnection cn = await _db.OpenAsync(ct);
+        await using SqlTransaction tx = (SqlTransaction)await cn.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        try
+        {
+            LotteryRunInfo run = await ReadRunAsync(cn, tx, runId, false, ct)
+                ?? throw new ApiException(404, "run_not_found", "فراگرفت قرعه‌کشی پیدا نشد.");
+            if (run.WinnerFCode == null)
+                throw new ApiException(409, "no_winner", "این فراگرفت برندهٔ ثبت‌شده ندارد.");
+
+            using (SqlCommand upd = new(@"
+UPDATE dbo.LotteryRuns SET WinnerImageUrl=@img, WinnerImageApproved=@ok, WinnerImageUpdatedAt=SYSUTCDATETIME()
+WHERE RunId=@id;", cn, tx))
+            {
+                upd.Parameters.AddWithValue("@img", (object?)image ?? DBNull.Value);
+                upd.Parameters.AddWithValue("@ok", image != null && approved ? 1 : 0);
+                upd.Parameters.AddWithValue("@id", runId);
+                await upd.ExecuteNonQueryAsync(ct);
+            }
+
+            await AuditWriter.WriteAsync(cn, tx, actor,
+                image == null ? "lottery.image.removed" : "lottery.image.set", "LotteryRun", runId.ToString(),
+                new { runId, imageUrl = image, approved = image != null && approved }, ct);
+            await tx.CommitAsync(ct);
+            await using SqlConnection rcn = await _db.OpenAsync(ct);
+            return (await ReadRunAsync(rcn, runId, false, ct))!;
+        }
+        catch (ApiException)
+        {
+            try { await tx.RollbackAsync(ct); } catch { }
+            throw;
+        }
+        catch
+        {
+            try { await tx.RollbackAsync(ct); } catch { }
+            throw;
+        }
+    }
+
+    /// <summary>تعداد نتایج منتشرشده؛ برای صفحه‌بندی فهرست عمومی برندگان.</summary>
+    public async Task<int> CountPublishedAsync(int? roundNo, CancellationToken ct = default)
+    {
+        await using SqlConnection cn = await _db.OpenAsync(ct);
+        using SqlCommand cmd = new(@"
+SELECT COUNT(*) FROM dbo.LotteryRuns r INNER JOIN dbo.Rounds ro ON ro.RoundId = r.RoundId
+WHERE r.PublishApproved=1 AND r.Status='Finalized' AND (@roundNo IS NULL OR ro.RoundNo=@roundNo);", cn);
+        cmd.Parameters.AddWithValue("@roundNo", (object?)roundNo ?? DBNull.Value);
+        return Convert.ToInt32(await cmd.ExecuteScalarAsync(ct));
+    }
+
+    /// <summary>برندگان منتشرشده برای صفحهٔ عمومی (فقط تأییدشده و نهایی).</summary>
+    public async Task<List<LotteryRunInfo>> ListPublishedAsync(int limit, int offset, int? roundNo,
+        CancellationToken ct = default)
+    {
+        List<LotteryRunInfo> list = new();
+        await using SqlConnection cn = await _db.OpenAsync(ct);
+        using SqlCommand cmd = new($@"
+SELECT {RunColumns} FROM dbo.LotteryRuns r INNER JOIN dbo.Rounds ro ON ro.RoundId = r.RoundId
+WHERE r.PublishApproved=1 AND r.Status='Finalized' AND (@roundNo IS NULL OR ro.RoundNo=@roundNo)
+ORDER BY ro.RoundNo DESC
+OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;", cn);
+        cmd.Parameters.AddWithValue("@limit", limit);
+        cmd.Parameters.AddWithValue("@offset", offset);
+        cmd.Parameters.AddWithValue("@roundNo", (object?)roundNo ?? DBNull.Value);
+        using SqlDataReader rd = await cmd.ExecuteReaderAsync(ct);
+        while (await rd.ReadAsync(ct)) list.Add(MapRun(rd));
+        return list;
+    }
+
+    /// <summary>یک برندهٔ منتشرشده بر اساس شمارهٔ دوره.</summary>
+    public async Task<LotteryRunInfo?> GetPublishedByRoundAsync(int roundNo, CancellationToken ct = default)
+    {
+        await using SqlConnection cn = await _db.OpenAsync(ct);
+        using SqlCommand cmd = new($@"
+SELECT {RunColumns} FROM dbo.LotteryRuns r INNER JOIN dbo.Rounds ro ON ro.RoundId = r.RoundId
+WHERE r.PublishApproved=1 AND r.Status='Finalized' AND ro.RoundNo=@no;", cn);
+        cmd.Parameters.AddWithValue("@no", roundNo);
+        using SqlDataReader rd = await cmd.ExecuteReaderAsync(ct);
+        return await rd.ReadAsync(ct) ? MapRun(rd) : null;
+    }
+
+    /// <summary>آخرین نتیجهٔ منتشرشده برای نمایش در صفحهٔ کمپین.</summary>
+    public async Task<LotteryRunInfo?> GetLatestPublishedAsync(CancellationToken ct = default)
+    {
+        await using SqlConnection cn = await _db.OpenAsync(ct);
+        using SqlCommand cmd = new($@"
+SELECT TOP 1 {RunColumns} FROM dbo.LotteryRuns r INNER JOIN dbo.Rounds ro ON ro.RoundId = r.RoundId
+WHERE r.PublishApproved=1 AND r.Status='Finalized' ORDER BY ro.RoundNo DESC;", cn);
+        using SqlDataReader rd = await cmd.ExecuteReaderAsync(ct);
+        return await rd.ReadAsync(ct) ? MapRun(rd) : null;
+    }
+
+    /// <summary>فراگرفت فعال یک دوره (برای نمایش وضعیت «نیازمند بررسی» در صفحهٔ کمپین).</summary>
+    public async Task<LotteryRunInfo?> GetActiveRunOfRoundAsync(int roundId, CancellationToken ct = default)
+    {
+        await using SqlConnection cn = await _db.OpenAsync(ct);
+        return await ReadRunByRoundAsync(cn, roundId, false, ct);
+    }
+
+    /// <summary>
+    /// فهرست عمومی ورودی‌های یک فراگرفت: شناسهٔ مستعار، صلاحیت و وزن. بدون موبایل،
+    /// بدون شمارهٔ فاکتور، بدون شناسهٔ مشتری و بدون وضعیت بله.
+    /// </summary>
+    public async Task<List<PublicEntry>> ListPublicEntriesAsync(int runId, int limit, int offset,
+        CancellationToken ct = default)
+    {
+        List<PublicEntry> list = new();
+        await using SqlConnection cn = await _db.OpenAsync(ct);
+        LotteryRunInfo run = await ReadRunAsync(cn, runId, false, ct)
+            ?? throw new ApiException(404, "run_not_found", "فراگرفت قرعه‌کشی پیدا نشد.");
+        if (string.IsNullOrEmpty(run.SeedHex))
+            throw new ApiException(409, "seed_not_revealed",
+                "فهرست ورودی‌ها پیش از انتخاب برنده منتشر نمی‌شود.");
+
+        using SqlCommand cmd = new(@"
+SELECT EntryNo, Eligibility, Weight FROM dbo.LotteryEntries
+WHERE RunId=@id ORDER BY EntryNo OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY;", cn);
+        cmd.Parameters.AddWithValue("@id", runId);
+        cmd.Parameters.AddWithValue("@limit", limit);
+        cmd.Parameters.AddWithValue("@offset", offset);
+        using SqlDataReader rd = await cmd.ExecuteReaderAsync(ct);
+        while (await rd.ReadAsync(ct))
+        {
+            int entryNo = rd.GetInt32(0);
+            list.Add(new PublicEntry
+            {
+                EntryNo = entryNo,
+                Pseudonym = LotteryEngine.Pseudonym(run.SeedHex, entryNo),
+                Eligibility = rd.GetString(1),
+                Weight = rd.GetInt64(2),
+                Winner = run.WinnerEntryNo == entryNo
+            });
+        }
+        return list;
+    }
+
+    // ------------------------------------------------------------------
+    private static string PublicEntriesHashOf(string seedHex, List<RawEntry> raw)
+        => LotteryEngine.PublicEntriesHash(raw.OrderBy(x => x.EntryNo).Select(x =>
+            LotteryEngine.PublicEntryLine(x.EntryNo, LotteryEngine.Pseudonym(seedHex, x.EntryNo),
+                x.Eligibility, x.Weight)));
+
+    /// <summary>هش عمومی ذخیره‌شده؛ برای فراگرافت‌های قدیمی از هش داخلی جدا نگه داشته می‌شود.</summary>
+    private static string PublicHashOf(LotteryRunInfo run)
+        => string.IsNullOrEmpty(run.PublicEntriesHash) ? run.EntriesHash : run.PublicEntriesHash;
+
+    /// <summary>اعتبارسنجی آدرس تصویر برنده: فقط http/https با پسوند تصویر مجاز.</summary>
+    private static string? ValidateImageUrl(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        string s = raw.Trim();
+        if (s.Length > 400) throw new ApiException(400, "image_url_invalid", "آدرس تصویر بیش از حد بلند است.");
+        if (!Uri.TryCreate(s, UriKind.Absolute, out Uri? uri) ||
+            (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp))
+            throw new ApiException(400, "image_url_invalid", "آدرس تصویر باید http یا https باشد.");
+        string path = uri.AbsolutePath.ToLowerInvariant();
+        if (!(path.EndsWith(".jpg") || path.EndsWith(".jpeg") || path.EndsWith(".png") || path.EndsWith(".webp")))
+            throw new ApiException(400, "image_url_invalid", "پسوند تصویر باید jpg، jpeg، png یا webp باشد.");
+        return s;
     }
 
     /// <summary>
@@ -593,7 +893,8 @@ ORDER BY r.RunId DESC;", cn);
     r.EntryCount, r.EligibleCount, r.TotalWeight, r.CommitmentHash, r.SeedHex, r.AcknowledgedReviews,
     r.WinnerInvoiceId, r.WinnerFCode, r.WinnerEntryNo, r.WinnerCustomerCode, r.WinnerMobile, r.WinnerPoints,
     r.WinnerDrawValue, r.WinnerTotalWeight, r.ReviewReason, r.ResultsQuestioned, r.PreparedBy, r.PreparedAt,
-    r.SelectedAt, r.FinalizedBy, r.FinalizedAt";
+    r.SelectedAt, r.FinalizedBy, r.FinalizedAt, r.PublicEntriesHash, r.PublishApproved, r.PublishApprovedBy,
+    r.PublishApprovedAt, r.PublishedDisplayName, r.WinnerImageUrl, r.WinnerImageApproved, r.WinnerImageUpdatedAt";
 
     private static LotteryRunInfo MapRun(SqlDataReader r)
     {
@@ -631,7 +932,15 @@ ORDER BY r.RunId DESC;", cn);
         PreparedAt = r.GetDateTime(23),
         SelectedAt = r.IsDBNull(24) ? null : r.GetDateTime(24),
         FinalizedBy = r.IsDBNull(25) ? null : r.GetString(25),
-        FinalizedAt = r.IsDBNull(26) ? null : r.GetDateTime(26)
+        FinalizedAt = r.IsDBNull(26) ? null : r.GetDateTime(26),
+        PublicEntriesHash = r.IsDBNull(27) ? null : r.GetString(27).Trim(),
+        PublishApproved = r.GetBoolean(28),
+        PublishApprovedBy = r.IsDBNull(29) ? null : r.GetString(29),
+        PublishApprovedAt = r.IsDBNull(30) ? null : r.GetDateTime(30),
+        PublishedDisplayName = r.IsDBNull(31) ? null : r.GetString(31),
+        WinnerImageUrl = r.IsDBNull(32) ? null : r.GetString(32),
+        WinnerImageApproved = r.GetBoolean(33),
+        WinnerImageUpdatedAt = r.IsDBNull(34) ? null : r.GetDateTime(34)
         };
     }
 

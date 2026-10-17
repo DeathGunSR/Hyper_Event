@@ -256,6 +256,17 @@ public sealed class LotteryRunInfo
     public DateTime? SelectedAt { get; set; }
     public string? FinalizedBy { get; set; }
     public DateTime? FinalizedAt { get; set; }
+    /// <summary>هش عمومی ورودی‌ها (مبنای تعهد و بازتولید عمومی).</summary>
+    public string? PublicEntriesHash { get; set; }
+    /// <summary>تأیید صریح مدیر برای انتشار عمومی نتیجه؛ تا نبود آن، خروجی عمومی برنده ندارد.</summary>
+    public bool PublishApproved { get; set; }
+    public string? PublishApprovedBy { get; set; }
+    public DateTime? PublishApprovedAt { get; set; }
+    /// <summary>نام نمایشی برنده در سایت؛ فقط همان چیزی که جازهٔ انتشار دارد.</summary>
+    public string? PublishedDisplayName { get; set; }
+    public string? WinnerImageUrl { get; set; }
+    public bool WinnerImageApproved { get; set; }
+    public DateTime? WinnerImageUpdatedAt { get; set; }
     public List<LotteryEntryInfo>? Entries { get; set; }
     /// <summary>Seed کامل فقط داخل سرور استفاده می‌شود و در پاسخ API منتشر نمی‌شود.</summary>
     [JsonIgnore]
@@ -271,12 +282,144 @@ public sealed class LotteryVerifyResult
     public string Algorithm { get; set; } = "";
     public bool SeedRevealed { get; set; }
     public bool EntriesHashMatches { get; set; }
+    /// <summary>هش عمومی بازتولیدشده از Snapshot و Seed افشاشده.</summary>
+    public string? PublicEntriesHash { get; set; }
+    public bool PublicEntriesHashMatches { get; set; }
     public bool CommitmentMatches { get; set; }
     public bool WinnerReproduces { get; set; }
     public long? ExpectedWinnerFCode { get; set; }
     public long? RecomputedWinnerFCode { get; set; }
     public int? RecomputedEntryNo { get; set; }
     public string Note { get; set; } = "";
+}
+
+// ---------------- API عمومی (بند ۵ و ۶) ----------------
+// هیچ‌کدام از این DTOها دادهٔ خصوصی (موبایل کامل، شمارهٔ فاکتور، شناسهٔ مشتری،
+// شواهد بررسی، وضعیت بله) را حمل نمی‌کنند.
+
+public sealed class PublicCampaignStatus
+{
+    /// <summary>Collecting | DrawPending | RequiresReview | ResultPublished | NextRoundPending</summary>
+    public string State { get; set; } = "";
+    public string StateText { get; set; } = "";
+    public int? RoundNo { get; set; }
+    public string RoundStatus { get; set; } = "";
+    public int Count { get; set; }
+    public int Target { get; set; }
+    public int Remaining { get; set; }
+    public double ProgressPercent { get; set; }
+    public long PrizeToman { get; set; }
+    public bool AcceptingNewInvoices { get; set; }
+    /// <summary>دورهٔ تکمیل‌شده با شروع‌نشدن دورهٔ بعد؛ شمارنده صفر نمی‌شود.</summary>
+    public bool AwaitingManagerStart { get; set; }
+    public PublicWinnerCard? LastResult { get; set; }
+    public DateTime UpdatedAt { get; set; }
+}
+
+public sealed class PublicWinnerCard
+{
+    public int RoundNo { get; set; }
+    public DateTime? DrawnAt { get; set; }
+    public string? PublishedAt { get; set; }
+    public long PrizeToman { get; set; }
+    /// <summary>شمارهٔ سانسورشده؛ هرگز شمارهٔ کامل نیست.</summary>
+    public string MobileMasked { get; set; } = "";
+    public string? DisplayName { get; set; }
+    public string? ImageUrl { get; set; }
+    public int EntryCount { get; set; }
+    public int EligibleCount { get; set; }
+    public long TotalWeight { get; set; }
+    public string VerificationStatus { get; set; } = "";
+}
+
+public sealed class PublicWinnersPage
+{
+    public int Page { get; set; }
+    public int PerPage { get; set; }
+    public int Total { get; set; }
+    public bool HasMore { get; set; }
+    public List<PublicWinnerCard> Winners { get; set; } = new();
+}
+
+/// <summary>سند عمومی قرعه‌کشی: قابل بازتولید برای ممیز مستقل و بدون دادهٔ شخصی.</summary>
+public sealed class PublicLotteryReceipt
+{
+    public int RunId { get; set; }
+    public int RoundNo { get; set; }
+    public string Algorithm { get; set; } = "";
+    public string Status { get; set; } = "";
+    public int EntryCount { get; set; }
+    public int EligibleCount { get; set; }
+    public long TotalWeight { get; set; }
+    /// <summary>هش عمومی ورودی‌ها؛ مبنای تعهد و زمینهٔ انتخاب.</summary>
+    public string PublicEntriesHash { get; set; } = "";
+    public string CommitmentHash { get; set; } = "";
+    public string? SeedHex { get; set; }
+    public bool SeedRevealed { get; set; }
+    public long? DrawValue { get; set; }
+    public int? WinnerEntryNo { get; set; }
+    public string? WinnerPseudonym { get; set; }
+    public string MobileMasked { get; set; } = "";
+    public string? DisplayName { get; set; }
+    public string? ImageUrl { get; set; }
+    public DateTime? PreparedAt { get; set; }
+    public DateTime? DrawnAt { get; set; }
+    public DateTime? FinalizedAt { get; set; }
+    public DateTime? PublishedAt { get; set; }
+    public bool Verified { get; set; }
+    public string VerificationNote { get; set; } = "";
+}
+
+public sealed class PublicEntry
+{
+    public int EntryNo { get; set; }
+    public string Pseudonym { get; set; } = "";
+    public string Eligibility { get; set; } = "";
+    public long Weight { get; set; }
+    public bool Winner { get; set; }
+}
+
+public sealed class PublicEntriesPage
+{
+    public int RunId { get; set; }
+    public string PublicEntriesHash { get; set; } = "";
+    public int Page { get; set; }
+    public int PerPage { get; set; }
+    public int Total { get; set; }
+    public bool HasMore { get; set; }
+    public List<PublicEntry> Entries { get; set; } = new();
+}
+
+public sealed class PublicVerifyResult
+{
+    public int RunId { get; set; }
+    public int RoundNo { get; set; }
+    public string Algorithm { get; set; } = "";
+    public bool SeedRevealed { get; set; }
+    public bool PublicEntriesHashMatches { get; set; }
+    public bool CommitmentMatches { get; set; }
+    public bool WinnerReproduces { get; set; }
+    public int? WinnerEntryNo { get; set; }
+    public string? WinnerPseudonym { get; set; }
+    public string Note { get; set; } = "";
+}
+
+/// <summary>درخواست تأیید انتشار عمومی نتیجه.</summary>
+public sealed class PublishRequest
+{
+    public string? Actor { get; set; }
+    public string? DisplayName { get; set; }
+    public string? ImageUrl { get; set; }
+    public bool ImageApproved { get; set; }
+    /// <summary>تأیید صریح مدیر برای انتشار؛ بدون آن هیچ انتشار عمومی انجام نمی‌شود.</summary>
+    public bool Confirm { get; set; }
+}
+
+public sealed class WinnerImageRequest
+{
+    public string? Actor { get; set; }
+    public string? ImageUrl { get; set; }
+    public bool Approved { get; set; }
 }
 
 public sealed class ApiError

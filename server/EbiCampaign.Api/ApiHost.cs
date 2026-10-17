@@ -33,6 +33,7 @@ public static class ApiHost
                     ? d : new DateOnly(2026, 1, 1),
                 PointsPerAmountToman = decimal.TryParse(cfg["Campaign:PointsPerAmountToman"], out decimal p) && p > 0 ? p : 500000m,
                 PointsBase = (cfg["Campaign:PointsBase"] ?? "gross").ToLowerInvariant(),
+                PrizeToman = long.TryParse(cfg["Campaign:PrizeToman"], out long pz) && pz > 0 ? pz : 10_000_000L,
                 RequireBaleMembership = !bool.TryParse(cfg["Campaign:RequireBaleMembership"], out bool rb) || rb
             };
             return opt;
@@ -42,10 +43,45 @@ public static class ApiHost
         // پیش‌فرض: هیچ اتصال بله‌ای پیکربندی نشده است؛ سرویس جایگزین فقط برای آزمون تزریق می‌شود.
         builder.Services.AddSingleton<IBaleMembershipProvider, UnconfiguredBaleProvider>();
         builder.Services.AddSingleton<LotteryService>();
+        builder.Services.AddSingleton(new PublicCache());
+        builder.Services.AddSingleton(sp => new PublicRateLimiter(
+            int.TryParse(builder.Configuration["PublicApi:RateLimitPerMinute"], out int rl) && rl > 0 ? rl : 120));
+        builder.Services.AddSingleton<PublicService>();
         configureServices?.Invoke(builder.Services);
 
         WebApplication app = builder.Build();
         app.Use(ErrorMiddleware);
+
+        // محدودیت نرخ مسیرهای عمومی + تازه‌سازی کش پس از هر تغییر موفق در سرویس مرکزی.
+        app.Use(async (ctx, next) =>
+        {
+            if (ctx.Request.Path.StartsWithSegments("/api/v1/public"))
+            {
+                PublicRateLimiter limiter = ctx.RequestServices.GetRequiredService<PublicRateLimiter>();
+                string clientKey = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                if (!limiter.TryAcquire(clientKey, out int remaining, out int retryAfter))
+                {
+                    ctx.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                    ctx.Response.Headers["Retry-After"] = retryAfter.ToString();
+                    ctx.Response.ContentType = "application/json; charset=utf-8";
+                    await ctx.Response.WriteAsync(JsonSerializer.Serialize(new ApiError
+                    {
+                        Code = "rate_limited",
+                        Message = "تعداد درخواست‌های عمومی بیش از حد مجاز است؛ کمی بعد تلاش کنید."
+                    }, Json));
+                    return;
+                }
+                ctx.Response.Headers["X-RateLimit-Limit"] = limiter.Limit.ToString();
+                ctx.Response.Headers["X-RateLimit-Remaining"] = remaining.ToString();
+            }
+
+            await next();
+
+            if (ctx.Response.StatusCode < 400
+                && (HttpMethods.IsPost(ctx.Request.Method) || HttpMethods.IsDelete(ctx.Request.Method))
+                && ctx.Request.Path.StartsWithSegments("/api"))
+                ctx.RequestServices.GetRequiredService<PublicCache>().Invalidate();
+        });
 
         // ---------------- عمومی ----------------
         /// <summary>زیست‌سنجی سبک بدون دست‌زدن به دیتابیس؛ مناسب کاوشگر بار متعادل‌کننده.</summary>
@@ -113,7 +149,7 @@ public static class ApiHost
 
         app.MapPost("/api/v1/admin/rounds/start", async (HttpContext ctx, CampaignService svc) =>
         {
-            RequireAdmin(ctx);
+            RequireAdmin(ctx, Cap.CampaignManage);
             AdminActionRequest? req = await ReadOptionalJsonAsync<AdminActionRequest>(ctx);
             RoundInfo round = await svc.StartRoundAsync(req?.Actor ?? ActorOf(ctx), ctx.RequestAborted);
             return Results.Json(round, Json);
@@ -121,7 +157,7 @@ public static class ApiHost
 
         app.MapPost("/api/v1/admin/rounds/{id:int}/close", async (HttpContext ctx, int id, CampaignService svc) =>
         {
-            RequireAdmin(ctx);
+            RequireAdmin(ctx, Cap.CampaignManage);
             AdminActionRequest? req = await ReadOptionalJsonAsync<AdminActionRequest>(ctx);
             RoundInfo round = await svc.CloseRoundAsync(id, req?.Actor ?? ActorOf(ctx), ctx.RequestAborted);
             return Results.Json(round, Json);
@@ -136,7 +172,7 @@ public static class ApiHost
 
         app.MapPost("/api/v1/admin/held/assign", async (HttpContext ctx, CampaignService svc) =>
         {
-            RequireAdmin(ctx);
+            RequireAdmin(ctx, Cap.CampaignManage);
             AssignHeldRequest? req = await ReadOptionalJsonAsync<AssignHeldRequest>(ctx);
             if (req == null || req.RoundId <= 0)
                 throw new ApiException(400, "round_required", "RoundId الزامی است.");
@@ -146,7 +182,7 @@ public static class ApiHost
 
         app.MapPost("/api/v1/admin/invoices/{id:long}/void", async (HttpContext ctx, long id, CampaignService svc) =>
         {
-            RequireAdmin(ctx);
+            RequireAdmin(ctx, Cap.ReviewDecide);
             VoidRequest? req = await ReadOptionalJsonAsync<VoidRequest>(ctx);
             if (req == null) throw new ApiException(400, "body_required", "بدنهٔ درخواست الزامی است.");
             VoidResult res = await svc.VoidInvoiceAsync(id, req.Reason ?? "", req.Actor ?? ActorOf(ctx), ctx.RequestAborted);
@@ -155,7 +191,7 @@ public static class ApiHost
 
         app.MapPost("/api/v1/admin/invoices/{id:long}/revalidate", async (HttpContext ctx, long id, CampaignService svc) =>
         {
-            RequireAdmin(ctx);
+            RequireAdmin(ctx, Cap.ReviewDecide);
             AdminActionRequest? req = await ReadOptionalJsonAsync<AdminActionRequest>(ctx);
             RevalidateResult res = await svc.RevalidateInvoiceAsync(id, req?.Actor ?? ActorOf(ctx), ctx.RequestAborted);
             return Results.Json(res, Json);
@@ -170,6 +206,52 @@ public static class ApiHost
             return Results.Json(await svc.GetInvoicesAsync(roundId, status, limit, ctx.RequestAborted), Json);
         });
 
+        // ---------------- عمومی: کمپین، برندگان و سند قرعه‌کشی (بندهای ۵ و ۶) ----------------
+        app.MapGet("/api/v1/public/campaign/current", async (HttpContext ctx, PublicService svc) =>
+        {
+            PublicCampaignStatus status = await svc.GetCampaignAsync(ctx.RequestAborted);
+            return PublicJson(ctx, status, 5);
+        });
+
+        app.MapGet("/api/v1/public/winners", async (HttpContext ctx, PublicService svc) =>
+        {
+            int page = QueryInt(ctx, "page", 1, 1, 1000);
+            int perPage = QueryInt(ctx, "perPage", 20, 1, 50);
+            int? roundNo = QueryIntOrNull(ctx, "roundNo", 1, 100000);
+            PublicWinnersPage result = await svc.GetWinnersAsync(page, perPage, roundNo, ctx.RequestAborted);
+            return PublicJson(ctx, result, 30);
+        });
+
+        app.MapGet("/api/v1/public/winners/{roundNo:int}", async (HttpContext ctx, int roundNo, PublicService svc) =>
+        {
+            PublicWinnerCard? card = await svc.GetWinnerAsync(roundNo, ctx.RequestAborted);
+            if (card == null)
+                throw new ApiException(404, "not_found", "برای این دوره برندهٔ منتشرشده‌ای وجود ندارد.");
+            return PublicJson(ctx, card, 30);
+        });
+
+        app.MapGet("/api/v1/public/lottery/{id:int}/receipt", async (HttpContext ctx, int id, PublicService svc) =>
+        {
+            PublicLotteryReceipt? receipt = await svc.GetReceiptAsync(id, ctx.RequestAborted);
+            if (receipt == null) throw new ApiException(404, "not_found", "سند قرعه‌کشی پیدا نشد.");
+            return PublicJson(ctx, receipt, 60);
+        });
+
+        app.MapGet("/api/v1/public/lottery/{id:int}/entries", async (HttpContext ctx, int id, PublicService svc) =>
+        {
+            int page = QueryInt(ctx, "page", 1, 1, 100000);
+            int perPage = QueryInt(ctx, "perPage", 200, 1, 500);
+            PublicEntriesPage entries = await svc.GetEntriesAsync(id, page, perPage, ctx.RequestAborted);
+            return PublicJson(ctx, entries, 300);
+        });
+
+        app.MapGet("/api/v1/public/lottery/{id:int}/verify", async (HttpContext ctx, int id, PublicService svc) =>
+        {
+            PublicVerifyResult? result = await svc.GetVerifyAsync(id, ctx.RequestAborted);
+            if (result == null) throw new ApiException(404, "not_found", "سند قرعه‌کشی پیدا نشد.");
+            return PublicJson(ctx, result, 60);
+        });
+
         // ---------------- مسیر تصمیم مدیر (بند ۴.۲) ----------------
         app.MapGet("/api/v1/admin/invoices/{id:long}/detail", async (HttpContext ctx, long id, ReviewDecisionService svc) =>
         {
@@ -179,7 +261,7 @@ public static class ApiHost
 
         app.MapPost("/api/v1/admin/invoices/{id:long}/decision", async (HttpContext ctx, long id, ReviewDecisionService svc) =>
         {
-            RequireAdmin(ctx);
+            RequireAdmin(ctx, Cap.ReviewDecide);
             DecisionRequest? req = await ReadOptionalJsonAsync<DecisionRequest>(ctx);
             if (req == null) throw new ApiException(400, "body_required", "بدنهٔ درخواست الزامی است.");
             if (string.IsNullOrWhiteSpace(req.Actor)) req.Actor = ActorOf(ctx);
@@ -190,7 +272,7 @@ public static class ApiHost
         // ---------------- موتور قرعه‌کشی (بند ۵) ----------------
         app.MapPost("/api/v1/admin/rounds/{id:int}/lottery", async (HttpContext ctx, int id, LotteryService svc) =>
         {
-            RequireAdmin(ctx);
+            RequireAdmin(ctx, Cap.LotteryRun);
             PrepareLotteryRequest? req = await ReadOptionalJsonAsync<PrepareLotteryRequest>(ctx);
             LotteryRunInfo run = await svc.PrepareAsync(id, req?.AcknowledgeReviews ?? false,
                 req?.Actor ?? ActorOf(ctx), ctx.RequestAborted);
@@ -213,21 +295,21 @@ public static class ApiHost
 
         app.MapPost("/api/v1/admin/lottery/{id:int}/select", async (HttpContext ctx, int id, LotteryService svc) =>
         {
-            RequireAdmin(ctx);
+            RequireAdmin(ctx, Cap.LotteryRun);
             AdminActionRequest? req = await ReadOptionalJsonAsync<AdminActionRequest>(ctx);
             return Results.Json(await svc.SelectAsync(id, req?.Actor ?? ActorOf(ctx), ctx.RequestAborted), Json);
         });
 
         app.MapPost("/api/v1/admin/lottery/{id:int}/finalize", async (HttpContext ctx, int id, LotteryService svc) =>
         {
-            RequireAdmin(ctx);
+            RequireAdmin(ctx, Cap.LotteryRun);
             AdminActionRequest? req = await ReadOptionalJsonAsync<AdminActionRequest>(ctx);
             return Results.Json(await svc.FinalizeAsync(id, req?.Actor ?? ActorOf(ctx), ctx.RequestAborted), Json);
         });
 
         app.MapPost("/api/v1/admin/lottery/{id:int}/abort", async (HttpContext ctx, int id, LotteryService svc) =>
         {
-            RequireAdmin(ctx);
+            RequireAdmin(ctx, Cap.LotteryRun);
             VoidRequest? req = await ReadOptionalJsonAsync<VoidRequest>(ctx);
             if (req == null) throw new ApiException(400, "body_required", "بدنهٔ درخواست الزامی است.");
             return Results.Json(await svc.AbortAsync(id, req.Reason ?? "", req.Actor ?? ActorOf(ctx),
@@ -251,11 +333,54 @@ public static class ApiHost
         /// </summary>
         app.MapGet("/api/v1/admin/lottery/{id:int}/winner-contact", async (HttpContext ctx, int id, LotteryService svc) =>
         {
-            string actor = RequireAdmin(ctx);
+            string actor = RequireAdmin(ctx, Cap.PrivacyContact);
             return Results.Json(await svc.WinnerContactAsync(id, actor, ctx.RequestAborted), Json);
         });
 
+        // ---------------- انتشار عمومی نتیجهٔ قرعه‌کشی (فقط با تأیید صریح) ----------------
+        app.MapPost("/api/v1/admin/lottery/{id:int}/publish", async (HttpContext ctx, int id, LotteryService svc) =>
+        {
+            RequireAdmin(ctx, Cap.LotteryPublish);
+            PublishRequest? req = await ReadOptionalJsonAsync<PublishRequest>(ctx);
+            if (req == null || !req.Confirm)
+                throw new ApiException(400, "confirm_required",
+                    "انتشار عمومی نتیجه نیازمند تأیید صریح مدیر (confirm=true) است.");
+            LotteryRunInfo run = await svc.PublishAsync(id, req.DisplayName ?? "", req.ImageUrl, req.ImageApproved,
+                req.Actor ?? ActorOf(ctx), ctx.RequestAborted);
+            return Results.Json(run, Json);
+        });
+
+        app.MapPost("/api/v1/admin/lottery/{id:int}/unpublish", async (HttpContext ctx, int id, LotteryService svc) =>
+        {
+            RequireAdmin(ctx, Cap.LotteryPublish);
+            VoidRequest? req = await ReadOptionalJsonAsync<VoidRequest>(ctx);
+            if (req == null) throw new ApiException(400, "body_required", "بدنهٔ درخواست الزامی است.");
+            LotteryRunInfo run = await svc.UnpublishAsync(id, req.Reason ?? "", req.Actor ?? ActorOf(ctx),
+                ctx.RequestAborted);
+            return Results.Json(run, Json);
+        });
+
+        app.MapPost("/api/v1/admin/lottery/{id:int}/image", async (HttpContext ctx, int id, LotteryService svc) =>
+        {
+            RequireAdmin(ctx, Cap.LotteryPublish);
+            WinnerImageRequest? req = await ReadOptionalJsonAsync<WinnerImageRequest>(ctx);
+            if (req == null) throw new ApiException(400, "body_required", "بدنهٔ درخواست الزامی است.");
+            LotteryRunInfo run = await svc.SetWinnerImageAsync(id, req.ImageUrl, req.Approved,
+                req.Actor ?? ActorOf(ctx), ctx.RequestAborted);
+            return Results.Json(run, Json);
+        });
+
         return app;
+    }
+
+    /// <summary>مجوزهای مستقل سرور‌محور؛ هر مسیر فقط با کلید مدیر کل یا کلید نقش مربوطه باز می‌شود.</summary>
+    private static class Cap
+    {
+        public const string CampaignManage = "campaign.manage";
+        public const string ReviewDecide = "review.decide";
+        public const string LotteryRun = "lottery.run";
+        public const string LotteryPublish = "lottery.publish";
+        public const string PrivacyContact = "privacy.contact";
     }
 
     /// <summary>ساخت دیتابیس (در صورت مجاز بودن) و اجرای مهاجرت‌ها.</summary>
@@ -297,13 +422,23 @@ public static class ApiHost
         }
     }
 
-    private static string RequireAdmin(HttpContext ctx)
+    /// <summary>
+    /// احراز هویت مدیر. با کلید مدیر کل هر مسیری باز می‌شود؛ با کلید نقش، فقط مسیرهای
+    /// همان توانایی (capability). کنترل همیشه سمت سرور است و به پنهان‌کردن دکمه تکیه ندارد.
+    /// </summary>
+    private static string RequireAdmin(HttpContext ctx, string? capability = null)
     {
-        string expected = ctx.RequestServices.GetRequiredService<IConfiguration>()["Auth:AdminKey"] ?? "";
-        if (string.IsNullOrWhiteSpace(expected))
+        IConfiguration cfg = ctx.RequestServices.GetRequiredService<IConfiguration>();
+        string full = cfg["Auth:AdminKey"] ?? "";
+        string role = capability == null ? "" : cfg["Auth:Roles:" + capability] ?? "";
+
+        if (string.IsNullOrWhiteSpace(full) && string.IsNullOrWhiteSpace(role))
             throw new ApiException(503, "admin_disabled", "کلید مدیر تنظیم نشده است.");
+
         string got = ctx.Request.Headers["X-Admin-Key"].ToString();
-        if (!Security.FixedEquals(expected, got))
+        bool ok = (!string.IsNullOrWhiteSpace(full) && Security.FixedEquals(full, got))
+                  || (!string.IsNullOrWhiteSpace(role) && Security.FixedEquals(role, got));
+        if (!ok)
             throw new ApiException(401, "admin_unauthorized", "کلید مدیر نامعتبر است.");
         return ActorOf(ctx);
     }
@@ -336,6 +471,30 @@ public static class ApiHost
         string actor = ctx.Request.Headers["X-Actor"].ToString().Trim();
         if (actor.Length == 0) actor = "admin";
         return actor.Length > 100 ? actor[..100] : actor;
+    }
+
+    private static IResult PublicJson(HttpContext ctx, object payload, int maxAgeSeconds)
+    {
+        ctx.Response.Headers["Cache-Control"] = $"public, max-age={maxAgeSeconds}";
+        return Results.Json(payload, Json);
+    }
+
+    private static int QueryInt(HttpContext ctx, string name, int fallback, int min, int max)
+    {
+        string raw = ctx.Request.Query[name].ToString();
+        if (string.IsNullOrWhiteSpace(raw)) return fallback;
+        if (!int.TryParse(raw, out int value) || value < min || value > max)
+            throw new ApiException(400, "query_invalid", $"مقدار «{name}» نامعتبر است.");
+        return value;
+    }
+
+    private static int? QueryIntOrNull(HttpContext ctx, string name, int min, int max)
+    {
+        string raw = ctx.Request.Query[name].ToString();
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        if (!int.TryParse(raw, out int value) || value < min || value > max)
+            throw new ApiException(400, "query_invalid", $"مقدار «{name}» نامعتبر است.");
+        return value;
     }
 
     private static async Task<byte[]> ReadBodyAsync(HttpContext ctx, int maxBytes)

@@ -24,6 +24,12 @@ internal static class Program
     private const string AgentASecret = "secret-a";
     private const string AgentB = "agent-b";
     private const string AgentBSecret = "secret-b";
+    // کلیدهای نقش: هر توانایی کلید مستقل خود را دارد (بند ۱۱ — کنترل سمت سرور).
+    private const string RoleCampaign = "role-campaign-key";
+    private const string RoleReview = "role-review-key";
+    private const string RoleLottery = "role-lottery-key";
+    private const string RolePublish = "role-publish-key";
+    private const string RolePrivacy = "role-privacy-key";
 
     private static WebApplication _app = null!;
     private static HttpClient _http = null!;
@@ -71,7 +77,14 @@ internal static class Program
                 ["Campaign:PointsBase"] = "gross",
                 ["Auth:AdminKey"] = AdminKey,
                 [$"Auth:Agents:{AgentA}"] = AgentASecret,
-                [$"Auth:Agents:{AgentB}"] = AgentBSecret
+                [$"Auth:Agents:{AgentB}"] = AgentBSecret,
+                ["Auth:Roles:campaign.manage"] = RoleCampaign,
+                ["Auth:Roles:review.decide"] = RoleReview,
+                ["Auth:Roles:lottery.run"] = RoleLottery,
+                ["Auth:Roles:lottery.publish"] = RolePublish,
+                ["Auth:Roles:privacy.contact"] = RolePrivacy,
+                ["Campaign:PrizeToman"] = "10000000",
+                ["PublicApi:RateLimitPerMinute"] = "120"
             }, services =>
             {
                 // در استقرار واقعی، این سرویس با پیکربندی ربات بله جایگزین می‌شود؛
@@ -147,6 +160,17 @@ internal static class Program
             await RunAsync("۴۲. انتخاب همزمان فقط یک برنده می‌سازد", LotteryConcurrentSelectAsync);
             await RunAsync("۴۳. پس از نهایی‌سازی، دورهٔ بعد فقط با دکمهٔ مدیر", NextRoundGatingAsync);
             await RunAsync("۴۴. بار همزمان ورودی‌ها شمارنده را دقیق نگه می‌دارد", ConcurrentIngestAsync);
+
+            Console.WriteLine();
+            Console.WriteLine("=== Phase 3 — API عمومی و حریم خصوصی (بندهای ۵ و ۶) ===");
+            await RunAsync("۴۵. وضعیت عمومی کمپین با شمارندهٔ واقعی و کش تازه‌شونده", PublicCampaignAsync);
+            await RunAsync("۴۶. دورهٔ تکمیل‌شده تا اعلام نتیجه صفر نمی‌شود", PublicCompletedRoundAsync);
+            await RunAsync("۴۷. انتشار عمومی نتیجه فقط با تأیید صریح مدیر", PublishRequiresApprovalAsync);
+            await RunAsync("۴۸. فهرست برندگان فقط دادهٔ منتشرشده را نمایش می‌دهد", PublicWinnersAsync);
+            await RunAsync("۴۹. سند عمومی قرعه‌کشی برای ممیز مستقل بازتولیدپذیر است", PublicAuditKitAsync);
+            await RunAsync("۵۰. هیچ مسیر عمومی دادهٔ خصوصی افشا نمی‌کند", NoPublicLeakAsync);
+            await RunAsync("۵۱. مجوزهای سرور‌محور از هم جدا هستند", CapabilitySeparationAsync);
+            await RunAsync("۵۲. محدودکنندهٔ نرخ مسیرهای عمومی", RateLimiterAsync);
         }
         catch (Exception ex)
         {
@@ -763,10 +787,13 @@ internal static class Program
         Check("هر فاکتور یک ورودی مستقل", run.EntryCount == 1000 && run.EligibleCount == 1000,
             $"entries={run.EntryCount} eligible={run.EligibleCount}");
         Check("وزن کل = مجموع امتیازها", run.TotalWeight == 1000, run.TotalWeight.ToString());
-        Check("الگوریتم اعلام‌شده", run.Algorithm == "ebi-lottery-weighted-v1", run.Algorithm);
+        Check("الگوریتم اعلام‌شده", run.Algorithm == "ebi-lottery-weighted-v2", run.Algorithm);
         Check("Seed پیش از انتخاب افشا نمی‌شود", run.SeedHex == null, run.SeedHex ?? "null");
         Check("تعهد هش منتشر شد", run.CommitmentHash.Length == 64 && run.CommitmentHash != run.EntriesHash,
             run.CommitmentHash);
+        Check("هش عمومی جدا از هش داخلی محرمانه است",
+            run.PublicEntriesHash is { Length: 64 } && run.PublicEntriesHash != run.EntriesHash,
+            run.PublicEntriesHash ?? "null");
 
         LotteryRunInfo again = await PrepareLotteryAsync(round.RoundId);
         Check("تثبیت تکراری همان فراگرفت را برمی‌گرداند", again.RunId == run.RunId, $"{again.RunId}/{run.RunId}");
@@ -786,7 +813,8 @@ internal static class Program
 
         LotteryVerifyResult v = await ReadJsonAsync<LotteryVerifyResult>(
             await AdminGetAsync($"/api/v1/admin/lottery/{run.RunId}/verify"));
-        Check("هش مجموعه از داده‌های Snapshot بازسازی شد", v.EntriesHashMatches, "EntriesHashMatches=false");
+        Check("هش داخلی مجموعه از داده‌های Snapshot بازسازی شد", v.EntriesHashMatches, "EntriesHashMatches=false");
+        Check("پیش از افشای Seed هش عمومی بازتولید نمی‌شود", !v.PublicEntriesHashMatches, "");
         Check("پیش از انتخاب Seed افشا نشده", !v.SeedRevealed && !v.CommitmentMatches, "");
         Check("سابقهٔ تثبیت در حسابرسی ثبت شد", await CountAuditAsync("lottery.prepare") == 1, "");
     }
@@ -826,7 +854,7 @@ internal static class Program
             .Where(e => e.Eligibility == "eligible" && e.Weight > 0)
             .OrderBy(e => e.EntryNo).ToList();
         byte[] seed = Convert.FromHexString(run.SeedHex!);
-        int idx = LotteryEngine.PickWeighted(seed, LotteryEngine.Context(receipt.RoundNo, receipt.EntriesHash),
+        int idx = LotteryEngine.PickWeighted(seed, LotteryEngine.Context(receipt.RoundNo, receipt.PublicEntriesHash!),
             eligible.Select(e => e.Weight).ToList(), out long draw, out long total);
         Check("سند حسابرسی برای بازتولید کافی است",
             eligible[idx].EntryNo == run.WinnerEntryNo && draw == run.WinnerDrawValue && total == run.WinnerTotalWeight,
@@ -846,7 +874,8 @@ internal static class Program
         LotteryVerifyResult after = await ReadJsonAsync<LotteryVerifyResult>(
             await AdminGetAsync($"/api/v1/admin/lottery/{prepared.RunId}/verify"));
         Check("راستی‌آزمایی پس از نهایی‌سازی کامل است",
-            after.SeedRevealed && after.EntriesHashMatches && after.CommitmentMatches && after.WinnerReproduces, "");
+            after.SeedRevealed && after.EntriesHashMatches && after.PublicEntriesHashMatches
+            && after.CommitmentMatches && after.WinnerReproduces, "");
     }
 
     private static async Task LotteryEligibilityAsync()
@@ -1025,6 +1054,326 @@ internal static class Program
     }
 
     // ------------------------------------------------------------------
+    //  Phase 3 — API عمومی، حریم خصوصی و مجوزها
+    // ------------------------------------------------------------------
+    private static async Task PublicCampaignAsync()
+    {
+        RoundInfo round = await StartFreshRoundAsync();
+        await IngestAsync(AgentA, AgentASecret, NewRequest("pub-1", Invoice(5101)));
+        Check("شمارندهٔ سرور = 1", (await CurrentRoundAsync()).Count == 1, "");
+
+        HttpResponseMessage r = await PublicGetAsync("/api/v1/public/campaign/current");
+        PublicCampaignStatus s = await ReadPublicAsync<PublicCampaignStatus>(r);
+        Check("وضعیت عمومی 200", r.StatusCode == HttpStatusCode.OK, await r.Content.ReadAsStringAsync());
+        Check("وضعیت Collecting و شمارهٔ دوره", s.State == "Collecting" && s.RoundNo == round.RoundNo,
+            s.State + "/" + s.RoundNo);
+        Check("شمارندهٔ واقعی و باقی‌مانده", s.Count == 1 && s.Target == 1000 && s.Remaining == 999,
+            $"{s.Count}/{s.Target}/{s.Remaining}");
+        Check("درصد پیشرفت", Math.Abs(s.ProgressPercent - 0.1) < 0.001, s.ProgressPercent.ToString(CultureInfo.InvariantCulture));
+        Check("جایزهٔ رسمی دوره", s.PrizeToman == 10_000_000, s.PrizeToman.ToString());
+        Check("پذیرش فاکتور جدید فقط در دورهٔ باز", s.AcceptingNewInvoices && !s.AwaitingManagerStart, "");
+        Check("نتیجهٔ عمومی هنوز ندارد", s.LastResult == null, "");
+        Check("کش عمومی اعلام می‌شود",
+            r.Headers.CacheControl?.MaxAge == TimeSpan.FromSeconds(5), r.Headers.CacheControl?.ToString() ?? "-");
+
+        await IngestAsync(AgentA, AgentASecret, NewRequest("pub-2", Invoice(5102)));
+        PublicCampaignStatus after = await ReadPublicAsync<PublicCampaignStatus>(
+            await PublicGetAsync("/api/v1/public/campaign/current"));
+        Check("کش پس از تغییر داده تازه شد", after.Count == 2, after.Count.ToString());
+    }
+
+    private static async Task PublicCompletedRoundAsync()
+    {
+        RoundInfo round = await StartFreshRoundAsync();
+        await SeedValidAsync(round.RoundId, 1000, complete: true);
+
+        PublicCampaignStatus s = await ReadPublicAsync<PublicCampaignStatus>(
+            await PublicGetAsync("/api/v1/public/campaign/current"));
+        Check("دورهٔ تکمیل‌شده وضعیت DrawPending", s.State == "DrawPending", s.State + "/" + s.RoundStatus);
+        Check("شمارندهٔ دورهٔ تکمیل‌شده صفر نشد", s.Count == 1000 && s.Remaining == 0 && s.ProgressPercent == 100,
+            $"{s.Count}/{s.Remaining}");
+        Check("دورهٔ بعد منتظر شروع مدیر است", s.AwaitingManagerStart && !s.AcceptingNewInvoices, "");
+
+        PublicWinnersPage winners = await ReadPublicAsync<PublicWinnersPage>(
+            await PublicGetAsync("/api/v1/public/winners"));
+        Check("برندهٔ منتشرنشده در فهرست عمومی نیست", winners.Total == 0 && winners.Winners.Count == 0,
+            winners.Total.ToString());
+    }
+
+    private static async Task PublishRequiresApprovalAsync()
+    {
+        RoundInfo round = await StartFreshRoundAsync();
+        await SeedValidAsync(round.RoundId, 1000, complete: true);
+        _baleReady = true;
+        BaleMembers.Add(SeedMobile);
+        int runId = await FinalizeRunAsync(round.RoundId);
+
+        HttpResponseMessage noConfirm = await AdminPostAsync($"/api/v1/admin/lottery/{runId}/publish",
+            new { actor = "owner", displayName = "خانم م." });
+        Check("انتشار بدون تأیید صریح = 400", noConfirm.StatusCode == HttpStatusCode.BadRequest,
+            await noConfirm.Content.ReadAsStringAsync());
+
+        HttpResponseMessage badImage = await AdminPostAsync($"/api/v1/admin/lottery/{runId}/image",
+            new { actor = "owner", imageUrl = "https://ebimarket.ir/uploads/winner.php", approved = true });
+        Check("پسوند غیرتصویری رد شد", badImage.StatusCode == HttpStatusCode.BadRequest,
+            await badImage.Content.ReadAsStringAsync());
+        HttpResponseMessage noConsent = await AdminPostAsync($"/api/v1/admin/lottery/{runId}/image",
+            new { actor = "owner", imageUrl = "https://ebimarket.ir/uploads/winner.jpg", approved = false });
+        Check("تصویر بدون تأیید رضایت رد شد", noConsent.StatusCode == HttpStatusCode.BadRequest,
+            await noConsent.Content.ReadAsStringAsync());
+
+        LotteryRunInfo published = await PublishAsync(runId, "خانم م.",
+            imageUrl: "https://ebimarket.ir/wp-content/uploads/2026/02/winner-1.jpg", imageApproved: true);
+        Check("انتشار با تأیید صریح 200", published.PublishApproved && published.PublishApprovedAt.HasValue, "");
+        Check("تصویر تأییدشده ثبت شد",
+            published.WinnerImageApproved && published.WinnerImageUrl!.EndsWith(".jpg"),
+            published.WinnerImageUrl ?? "-");
+
+        PublicCampaignStatus s = await ReadPublicAsync<PublicCampaignStatus>(
+            await PublicGetAsync("/api/v1/public/campaign/current"));
+        Check("وضعیت عمومی ResultPublished", s.State == "ResultPublished", s.State);
+        Check("آخرین نتیجهٔ منتشرشده نمایش داده می‌شود",
+            s.LastResult != null && s.LastResult.RoundNo == round.RoundNo, s.LastResult?.RoundNo.ToString() ?? "-");
+        Check("شمارهٔ برنده در نتیجهٔ عمومی سانسورشده است",
+            s.LastResult!.MobileMasked.Contains("***", StringComparison.Ordinal)
+            && s.LastResult.ImageUrl != null,
+            s.LastResult.MobileMasked);
+        Check("وضعیت راستی‌آزمایی قابل بازتولید", s.LastResult.VerificationStatus == "recomputable",
+            s.LastResult.VerificationStatus);
+        Check("گزارش انتشار در حسابرسی ثبت شد", await CountAuditAsync("lottery.publish") == 1, "");
+
+        HttpResponseMessage noReason = await AdminPostAsync($"/api/v1/admin/lottery/{runId}/unpublish",
+            new { actor = "owner" });
+        Check("لغو انتشار بدون دلیل = 400", noReason.StatusCode == HttpStatusCode.BadRequest, "");
+        LotteryRunInfo unpublished = await ReadJsonAsync<LotteryRunInfo>(
+            await AdminPostAsync($"/api/v1/admin/lottery/{runId}/unpublish",
+                new { actor = "owner", reason = "بازبینی نتیجه" }));
+        Check("لغو انتشار 200", !unpublished.PublishApproved, "");
+        Check("حسابرسی لغو انتشار ثبت شد", await CountAuditAsync("lottery.unpublish") == 1, "");
+        PublicCampaignStatus back = await ReadPublicAsync<PublicCampaignStatus>(
+            await PublicGetAsync("/api/v1/public/campaign/current"));
+        Check("وضعیت عمومی به DrawPending برگشت", back.State == "DrawPending" && back.LastResult == null, back.State);
+    }
+
+    private static async Task PublicWinnersAsync()
+    {
+        RoundInfo round = await StartFreshRoundAsync();
+        await SeedValidAsync(round.RoundId, 1000, complete: true);
+        _baleReady = true;
+        BaleMembers.Add(SeedMobile);
+        int runId = await FinalizeRunAsync(round.RoundId);
+        await PublishAsync(runId, "خانم م.");
+
+        PublicWinnersPage page = await ReadPublicAsync<PublicWinnersPage>(
+            await PublicGetAsync("/api/v1/public/winners?page=1&perPage=10"));
+        Check("برندهٔ منتشرشده در فهرست", page.Total == 1 && page.Winners.Count == 1 && !page.HasMore,
+            $"{page.Total}/{page.Winners.Count}");
+        PublicWinnerCard card = page.Winners[0];
+        Check("شمارهٔ سانسورشده", card.MobileMasked == "0912***0000", card.MobileMasked);
+        Check("نام نمایشی تأییدشده", card.DisplayName == "خانم م.", card.DisplayName ?? "-");
+        Check("تصویر تأییدنشده منتشر نمی‌شود", card.ImageUrl == null, card.ImageUrl ?? "-");
+        Check("جایزه و تاریخ قرعه‌کشی", card.PrizeToman == 10_000_000 && card.DrawnAt.HasValue, "");
+        Check("ورودی و وزن در کارت", card.EntryCount == 1000 && card.EligibleCount == 1000 && card.TotalWeight == 1000,
+            $"{card.EntryCount}/{card.EligibleCount}/{card.TotalWeight}");
+
+        PublicWinnerCard byRound = await ReadPublicAsync<PublicWinnerCard>(
+            await PublicGetAsync($"/api/v1/public/winners/{round.RoundNo}"));
+        Check("مسیر برندهٔ یک دوره", byRound.RoundNo == round.RoundNo, byRound.RoundNo.ToString());
+        HttpResponseMessage missing = await PublicGetAsync("/api/v1/public/winners/9999");
+        Check("دورهٔ بدون برندهٔ منتشرشده = 404", missing.StatusCode == HttpStatusCode.NotFound, "");
+        HttpResponseMessage badPerPage = await PublicGetAsync("/api/v1/public/winners?perPage=500");
+        Check("perPage بیش از حد = 400", badPerPage.StatusCode == HttpStatusCode.BadRequest, "");
+        HttpResponseMessage badPage = await PublicGetAsync("/api/v1/public/winners?page=0");
+        Check("page نامعتبر = 400", badPage.StatusCode == HttpStatusCode.BadRequest, "");
+        PublicWinnersPage filtered = await ReadPublicAsync<PublicWinnersPage>(
+            await PublicGetAsync("/api/v1/public/winners?roundNo=42"));
+        Check("فیلتر دورهٔ ناموجود فهرست را خالی می‌کند", filtered.Total == 0, filtered.Total.ToString());
+    }
+
+    private static async Task PublicAuditKitAsync()
+    {
+        RoundInfo round = await StartFreshRoundAsync();
+        await SeedValidAsync(round.RoundId, 1000, complete: true);
+        _baleReady = true;
+        BaleMembers.Add(SeedMobile);
+        int runId = await FinalizeRunAsync(round.RoundId);
+
+        HttpResponseMessage before = await PublicGetAsync($"/api/v1/public/lottery/{runId}/receipt");
+        Check("سند پیش از انتشار عمومی = 404", before.StatusCode == HttpStatusCode.NotFound, "");
+        await PublishAsync(runId, "خانم م.");
+
+        PublicLotteryReceipt receipt = await ReadPublicAsync<PublicLotteryReceipt>(
+            await PublicGetAsync($"/api/v1/public/lottery/{runId}/receipt"));
+        Check("سند عمومی 200", receipt.RunId == runId && receipt.Status == "Finalized", receipt.Status);
+        Check("Seed افشا شده و هش عمومی موجود",
+            receipt.SeedRevealed && receipt.SeedHex is { Length: 64 } && receipt.PublicEntriesHash.Length == 64, "");
+        Check("راستی‌آزمایی سند سبز است", receipt.Verified, receipt.VerificationNote);
+        Check("شناسهٔ مستعار برنده در سند", receipt.WinnerPseudonym is { Length: 12 },
+            receipt.WinnerPseudonym ?? "-");
+
+        PublicEntriesPage p1 = await ReadPublicAsync<PublicEntriesPage>(
+            await PublicGetAsync($"/api/v1/public/lottery/{runId}/entries?page=1&perPage=500"));
+        PublicEntriesPage p2 = await ReadPublicAsync<PublicEntriesPage>(
+            await PublicGetAsync($"/api/v1/public/lottery/{runId}/entries?page=2&perPage=500"));
+        List<PublicEntry> all = p1.Entries.Concat(p2.Entries).OrderBy(e => e.EntryNo).ToList();
+        Check("کل ۱۰۰۰ ورودی در دو صفحه منتشر شد", all.Count == 1000 && p1.Total == 1000 && !p2.HasMore,
+            $"{all.Count}/{p1.Total}");
+        Check("هر ورودی شناسهٔ مستعار دارد", all.All(e => e.Pseudonym.Length == 12 && e.EntryNo >= 1), "");
+
+        string recomputedHash = LotteryEngine.PublicEntriesHash(all.Select(e =>
+            LotteryEngine.PublicEntryLine(e.EntryNo, e.Pseudonym, e.Eligibility, e.Weight)));
+        Check("هش عمومی از فهرست منتشرشده بازتولید شد",
+            recomputedHash == p1.PublicEntriesHash, recomputedHash);
+
+        string recomputedCommitment = Security.Sha256Hex(
+            $"{receipt.Algorithm}|round={receipt.RoundNo}|entries={receipt.PublicEntriesHash}|seed={receipt.SeedHex}");
+        Check("تعهد از سند عمومی بازتولید شد", recomputedCommitment == receipt.CommitmentHash, recomputedCommitment);
+
+        List<PublicEntry> eligible = all.Where(e => e.Eligibility == "eligible" && e.Weight > 0).ToList();
+        byte[] seed = Convert.FromHexString(receipt.SeedHex!);
+        int idx = LotteryEngine.PickWeighted(seed,
+            LotteryEngine.Context(receipt.RoundNo, p1.PublicEntriesHash),
+            eligible.Select(e => e.Weight).ToList(), out long draw, out long total);
+        Check("انتخاب وزنی از دادهٔ عمومی بازتولید شد",
+            eligible[idx].EntryNo == receipt.WinnerEntryNo && draw == receipt.DrawValue && total == receipt.TotalWeight,
+            $"entry={eligible[idx].EntryNo} draw={draw} total={total}");
+
+        PublicVerifyResult verify = await ReadPublicAsync<PublicVerifyResult>(
+            await PublicGetAsync($"/api/v1/public/lottery/{runId}/verify"));
+        Check("مسیر تأیید عمومی همهٔ بررسی‌ها را سبز می‌دهد",
+            verify.PublicEntriesHashMatches && verify.CommitmentMatches && verify.WinnerReproduces, verify.Note);
+    }
+
+    private static async Task NoPublicLeakAsync()
+    {
+        RoundInfo round = await StartFreshRoundAsync();
+        await SeedValidAsync(round.RoundId, 1000, complete: true);
+        _baleReady = true;
+        BaleMembers.Add(SeedMobile);
+        int runId = await FinalizeRunAsync(round.RoundId);
+        await PublishAsync(runId, "خانم م.", imageUrl: "https://ebimarket.ir/uploads/w1.jpg", imageApproved: true);
+        LotteryRunInfo admin = await GetRunAsync(runId, entries: false);
+
+        string[] paths =
+        {
+            "/api/v1/public/campaign/current",
+            "/api/v1/public/winners?perPage=20",
+            $"/api/v1/public/winners/{round.RoundNo}",
+            $"/api/v1/public/lottery/{runId}/receipt",
+            $"/api/v1/public/lottery/{runId}/verify",
+            $"/api/v1/public/lottery/{runId}/entries?perPage=500&page=1"
+        };
+        StringBuilder bodies = new();
+        foreach (string path in paths)
+            bodies.Append(await (await PublicGetAsync(path)).Content.ReadAsStringAsync()).Append('\n');
+        string text = bodies.ToString();
+
+        Check("شمارهٔ کامل برنده افشا نمی‌شود", !text.Contains(SeedMobile, StringComparison.Ordinal), "");
+        Check("شناسهٔ فاکتور و مشتری افشا نمی‌شود",
+            !text.Contains("\"invoiceId\"", StringComparison.Ordinal)
+            && !text.Contains("\"fCode\"", StringComparison.Ordinal)
+            && !text.Contains("\"customerCode\"", StringComparison.Ordinal), "");
+        Check("شواهد بررسی و وضعیت بله افشا نمی‌شود",
+            !text.Contains("\"reviewReason\"", StringComparison.Ordinal)
+            && !text.Contains("\"reviewEvidence\"", StringComparison.Ordinal)
+            && !text.Contains("\"baleStatus\"", StringComparison.Ordinal)
+            && !text.Contains("\"baleEvidence\"", StringComparison.Ordinal), "");
+        Check("هش داخلی مجموعهٔ محرمانه افشا نمی‌شود",
+            !text.Contains("\"entriesHash\"", StringComparison.Ordinal)
+            && !text.Contains(admin.EntriesHash, StringComparison.Ordinal), "");
+        Check("جزئیات داخلی حسابرسی افشا نمی‌شود",
+            !text.Contains("\"preparedBy\"", StringComparison.Ordinal)
+            && !text.Contains("\"seedHex\":null", StringComparison.Ordinal), "");
+        Check("کنترل مثبت: برنده با شمارهٔ سانسورشده نمایش داده می‌شود",
+            text.Contains("0912***0000", StringComparison.Ordinal), "");
+    }
+
+    private static async Task CapabilitySeparationAsync()
+    {
+        RoundInfo round = await StartFreshRoundAsync();
+        await SeedValidAsync(round.RoundId, 1000, complete: true);
+        _baleReady = true;
+        BaleMembers.Add(SeedMobile);
+
+        HttpResponseMessage startDenied = await AdminPostWithKeyAsync("/api/v1/admin/rounds/start", RoleLottery,
+            new { actor = "x" });
+        Check("نقش قرعه‌کشی نمی‌تواند دورهٔ جدید شروع کند", startDenied.StatusCode == HttpStatusCode.Unauthorized,
+            await startDenied.Content.ReadAsStringAsync());
+
+        HttpResponseMessage prep = await AdminPostWithKeyAsync($"/api/v1/admin/rounds/{round.RoundId}/lottery",
+            RoleLottery, new { actor = "lottery-runner" });
+        Check("نقش lottery.run می‌تواند مجموعه را تثبیت کند", prep.StatusCode == HttpStatusCode.OK,
+            await prep.Content.ReadAsStringAsync());
+        LotteryRunInfo run = await ReadJsonAsync<LotteryRunInfo>(prep);
+
+        HttpResponseMessage publishDenied = await AdminPostWithKeyAsync($"/api/v1/admin/lottery/{run.RunId}/publish",
+            RoleLottery, new { actor = "x", confirm = true });
+        Check("نقش lottery.run اجازهٔ انتشار عمومی ندارد",
+            publishDenied.StatusCode == HttpStatusCode.Unauthorized, "");
+        HttpResponseMessage contactDenied = await AdminGetWithKeyAsync(
+            $"/api/v1/admin/lottery/{run.RunId}/winner-contact", RoleLottery);
+        Check("نقش lottery.run اجازهٔ شمارهٔ کامل برنده ندارد",
+            contactDenied.StatusCode == HttpStatusCode.Unauthorized, "");
+
+        HttpResponseMessage select = await AdminPostWithKeyAsync($"/api/v1/admin/lottery/{run.RunId}/select",
+            RoleLottery, new { actor = "lottery-runner" });
+        Check("نقش lottery.run انتخاب برنده را می‌تواند", select.StatusCode == HttpStatusCode.OK,
+            await select.Content.ReadAsStringAsync());
+        HttpResponseMessage fin = await AdminPostWithKeyAsync($"/api/v1/admin/lottery/{run.RunId}/finalize",
+            RoleLottery, new { actor = "lottery-runner" });
+        Check("نقش lottery.run نهایی‌سازی را می‌تواند", fin.StatusCode == HttpStatusCode.OK, "");
+
+        HttpResponseMessage publishWithRole = await AdminPostWithKeyAsync(
+            $"/api/v1/admin/lottery/{run.RunId}/publish", RolePublish, new { actor = "publisher", confirm = true });
+        Check("نقش lottery.publish انتشار را می‌تواند", publishWithRole.StatusCode == HttpStatusCode.OK,
+            await publishWithRole.Content.ReadAsStringAsync());
+        HttpResponseMessage selectWithPublishRole = await AdminPostWithKeyAsync(
+            $"/api/v1/admin/lottery/{run.RunId}/select", RolePublish, new { actor = "publisher" });
+        Check("نقش lottery.publish اجازهٔ اجرای قرعه‌کشی ندارد",
+            selectWithPublishRole.StatusCode == HttpStatusCode.Unauthorized, "");
+
+        HttpResponseMessage contact = await AdminGetWithKeyAsync(
+            $"/api/v1/admin/lottery/{run.RunId}/winner-contact", RolePrivacy);
+        string contactBody = await contact.Content.ReadAsStringAsync();
+        Check("نقش privacy.contact شمارهٔ کامل را می‌گیرد",
+            contact.StatusCode == HttpStatusCode.OK && contactBody.Contains(SeedMobile, StringComparison.Ordinal), "");
+        HttpResponseMessage publishWithPrivacyRole = await AdminPostWithKeyAsync(
+            $"/api/v1/admin/lottery/{run.RunId}/publish", RolePrivacy, new { actor = "privacy", confirm = true });
+        Check("نقش privacy.contact اجازهٔ انتشار ندارد",
+            publishWithPrivacyRole.StatusCode == HttpStatusCode.Unauthorized, "");
+
+        HttpResponseMessage decisionDenied = await AdminPostWithKeyAsync(
+            $"/api/v1/admin/invoices/1/decision", RoleLottery, new { verdict = "valid" });
+        Check("نقش قرعه‌کشی اجازهٔ تصمیم روی فاکتور ندارد",
+            decisionDenied.StatusCode == HttpStatusCode.Unauthorized, "");
+        HttpResponseMessage decisionAllowed = await AdminPostWithKeyAsync(
+            $"/api/v1/admin/invoices/1/decision", RoleReview, new { verdict = "valid", actor = "reviewer" });
+        Check("نقش review.decide به مسیر تصمیم دسترسی دارد",
+            decisionAllowed.StatusCode != HttpStatusCode.Unauthorized, await decisionAllowed.Content.ReadAsStringAsync());
+    }
+
+    private static async Task RateLimiterAsync()
+    {
+        PublicRateLimiter limiter = new(3, TimeSpan.FromMilliseconds(300));
+        bool a = limiter.TryAcquire("client-1", out int rem1, out _);
+        bool b = limiter.TryAcquire("client-1", out int rem2, out _);
+        bool c = limiter.TryAcquire("client-1", out int rem3, out _);
+        Check("سه درخواست اول مجاز", a && b && c, "");
+        Check("سرآمد مصرف‌شده کاهش می‌یابد", rem1 == 2 && rem2 == 1 && rem3 == 0, $"{rem1}/{rem2}/{rem3}");
+        Check("درخواست چهارم در همان پنجره رد می‌شود", !limiter.TryAcquire("client-1", out _, out int retry),
+            "");
+        Check("زمان انتظار اعلام می‌شود", retry >= 1, retry.ToString());
+        Check("کليد کلاینت دیگر مستقل است", limiter.TryAcquire("client-2", out _, out _), "");
+
+        await Task.Delay(400);
+        Check("پنجرهٔ ثابت پس از گذشت زمان بازنشانی می‌شود", limiter.TryAcquire("client-1", out _, out _), "");
+
+        HttpResponseMessage live = await PublicGetAsync("/api/v1/public/campaign/current");
+        Check("سرآمد محدودیت نرخ در پاسخ عمومی هست",
+            live.Headers.Contains("X-RateLimit-Limit") && live.Headers.Contains("X-RateLimit-Remaining"), "");
+    }
+
+    // ------------------------------------------------------------------
     //  ۴.۳ — آزمون بار (نگهداشت دقیق شمارنده زیر فشار همزمانی)
     // ------------------------------------------------------------------
     private static async Task RunLoadAsync(int total, int concurrency)
@@ -1126,6 +1475,59 @@ internal static class Program
     // ------------------------------------------------------------------
     //  helpers
     // ------------------------------------------------------------------
+    /// <summary>هر سه مرحلهٔ قرعه‌کشی: تثبیت، انتخاب و نهایی‌سازی.</summary>
+    private static async Task<int> FinalizeRunAsync(int roundId)
+    {
+        LotteryRunInfo run = await PrepareLotteryAsync(roundId);
+        HttpResponseMessage selected = await AdminPostAsync($"/api/v1/admin/lottery/{run.RunId}/select",
+            new { actor = "owner" });
+        if (selected.StatusCode != HttpStatusCode.OK)
+            throw new InvalidOperationException(await selected.Content.ReadAsStringAsync());
+        HttpResponseMessage fin = await AdminPostAsync($"/api/v1/admin/lottery/{run.RunId}/finalize",
+            new { actor = "owner" });
+        if (fin.StatusCode != HttpStatusCode.OK)
+            throw new InvalidOperationException(await fin.Content.ReadAsStringAsync());
+        return run.RunId;
+    }
+
+    private static async Task<LotteryRunInfo> PublishAsync(int runId, string displayName, string? imageUrl = null,
+        bool imageApproved = false)
+    {
+        HttpResponseMessage r = await AdminPostAsync($"/api/v1/admin/lottery/{runId}/publish", new
+        {
+            actor = "owner", confirm = true, displayName, imageUrl, imageApproved
+        });
+        string body = await r.Content.ReadAsStringAsync();
+        if (r.StatusCode != HttpStatusCode.OK) throw new InvalidOperationException(body);
+        return JsonSerializer.Deserialize<LotteryRunInfo>(body, CampaignService.Json)!;
+    }
+
+    /// <summary>درخواست عمومی بدون هیچ هدر احراز هویت.</summary>
+    private static Task<HttpResponseMessage> PublicGetAsync(string path) => _http.GetAsync(path);
+
+    private static async Task<T> ReadPublicAsync<T>(HttpResponseMessage r)
+    {
+        string body = await r.Content.ReadAsStringAsync();
+        if (r.StatusCode != HttpStatusCode.OK) throw new InvalidOperationException($"{(int)r.StatusCode}: {body}");
+        return JsonSerializer.Deserialize<T>(body, CampaignService.Json)
+            ?? throw new InvalidOperationException("پاسخ عمومی خالی: " + body);
+    }
+
+    private static async Task<HttpResponseMessage> AdminPostWithKeyAsync(string path, string key, object payload)
+    {
+        using HttpRequestMessage msg = new(HttpMethod.Post, path);
+        msg.Headers.Add("X-Admin-Key", key);
+        msg.Content = JsonContent(payload);
+        return await _http.SendAsync(msg);
+    }
+
+    private static async Task<HttpResponseMessage> AdminGetWithKeyAsync(string path, string key)
+    {
+        using HttpRequestMessage msg = new(HttpMethod.Get, path);
+        msg.Headers.Add("X-Admin-Key", key);
+        return await _http.SendAsync(msg);
+    }
+
     private static async Task<InvoiceDetail> InvoiceDetailAsync(long invoiceId)
     {
         HttpResponseMessage r = await AdminGetAsync($"/api/v1/admin/invoices/{invoiceId}/detail");

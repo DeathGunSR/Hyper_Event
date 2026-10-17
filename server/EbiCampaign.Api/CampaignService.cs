@@ -13,6 +13,8 @@ public sealed class CampaignOptions
     public string PointsBase { get; init; } = "gross";
     /// <summary>عضویت کانال بله باید در زمان قرعه‌کشی بررسی شود (بند ۳.۲).</summary>
     public bool RequireBaleMembership { get; init; } = true;
+    /// <summary>جایزهٔ رسمی هر دوره (تومان) — فقط برای نمایش و سند عمومی.</summary>
+    public long PrizeToman { get; init; } = 10_000_000L;
 }
 
 public sealed class CampaignService

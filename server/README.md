@@ -64,6 +64,9 @@ curl http://127.0.0.1:5080/health   # سلامت تفصیلی + دورهٔ جا�
 | `Campaign:RequireBaleMembership` | `true` | الزام عضویت کانال بله در زمان قرعه‌کشی |
 | `Auth:AdminKey` | خالی | خالی = مسیرهای مدیر غیرفعال (503) |
 | `Auth:Agents:<agentId>` | — | کلید HMAC هر صندوق |
+| `Auth:Roles:<capability>` | — | کلید نقشمحور: `campaign.manage`، `review.decide`، `lottery.run`، `lottery.publish`، `privacy.contact` |
+| `PublicApi:RateLimitPerMinute` | `120` | سقف درخواست عمومی هر کلاینت در دقیقه |
+| `Campaign:PrizeToman` | `10000000` | جایزهٔ رسمی هر دوره (تومان) در خروجی عمومی |
 
 مهاجرت‌ها هنگام شروع به‌صورت خودکار و نسخه‌دار روی دیتابیس کمپین اجرا می‌شوند (`dbo.SchemaVersions`).
 نسخه‌های ۳ و ۴ (`003_decisions.sql`، `004_lottery.sql`) جدول‌های تصمیم مدیر و قرعه‌کشی را می‌سازند و
@@ -96,7 +99,27 @@ curl http://127.0.0.1:5080/health   # سلامت تفصیلی + دورهٔ جا�
 | POST | `/api/v1/admin/lottery/{id}/abort` | `X-Admin-Key` | لغو فراگرفت پیش از انتخاب (با دلیل) |
 | GET | `/api/v1/admin/lottery/{id}/receipt` | `X-Admin-Key` | سند حسابرسی + فرمول‌های بازتولید |
 | GET | `/api/v1/admin/lottery/{id}/verify` | `X-Admin-Key` | بازمحاسبهٔ هش مجموعه، تعهد و برنده |
-| GET | `/api/v1/admin/lottery/{id}/winner-contact` | `X-Admin-Key` | شمارهٔ کامل برنده (ثبت‌شده در AuditLog) |
+| GET | `/api/v1/admin/lottery/{id}/winner-contact` | `privacy.contact` | شمارهٔ کامل برنده (ثبت‌شده در AuditLog) |
+| POST | `/api/v1/admin/lottery/{id}/publish` | `lottery.publish` | تأیید صریح انتشار عمومی نتیجه (`confirm=true`) |
+| POST | `/api/v1/admin/lottery/{id}/unpublish` | `lottery.publish` | لغو انتشار عمومی با دلیل |
+| POST | `/api/v1/admin/lottery/{id}/image` | `lottery.publish` | ثبت/حذف تصویر برنده با تأیید رضایت |
+
+### مسیرهای عمومی (بدون احراز هویت، با محدودیت نرخ و کش)
+
+| متد | مسیر | کار |
+|---|---|---|
+| GET | `/api/v1/public/campaign/current` | وضعیت واقعی کمپین: دوره، شمارنده، باقی‌مانده، درصد و آخرین نتیجهٔ منتشرشده |
+| GET | `/api/v1/public/winners` | فهرست صفحه‌بندی‌شدهٔ برندگان منتشرشده (`page`, `perPage`≤۵۰, `roundNo`) |
+| GET | `/api/v1/public/winners/{roundNo}` | کارت برندهٔ یک دوره (فقط منتشرشده) |
+| GET | `/api/v1/public/lottery/{id}/receipt` | سند عمومی قرعه‌کشی (هش عمومی، تعهد، Seed افشاشده، برندهٔ مستعار) |
+| GET | `/api/v1/public/lottery/{id}/entries` | فهرست ورودی‌ها با شناسهٔ مستعار، صلاحیت و وزن |
+| GET | `/api/v1/public/lottery/{id}/verify` | بازتولید هش عمومی، تعهد و برنده از دادهٔ عمومی |
+
+هیچ مسیر عمومی شمارهٔ کامل موبایل، شمارهٔ فاکتور، شناسهٔ مشتری، شواهد بررسی، وضعیت بله،
+هش داخلی مجموعه یا جزئیات حسابرسی را برنمی‌گرداند. نتیجه تا تأیید صریح انتشار (`lottery.publish`)
+در هیچ خروجی عمومی دیده نمی‌شود؛ سند و فهرست ورودی‌ها نیز پیش از آن `404` می‌دهند.
+الگوریتم سند عمومی `ebi-lottery-weighted-v2` است: تعهد و زمینهٔ انتخاب به هش عمومی ورودی‌ها
+گره خورده‌اند تا ممیز مستقل بدون دادهٔ خصوصی نتیجه را بازتولید کند؛ هش داخلی فقط برای مموری محرمانه می‌ماند.
 
 ### قرارداد ثبت فاکتور
 

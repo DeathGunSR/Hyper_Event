@@ -6,12 +6,19 @@ namespace EbiCampaign.Api;
 /// <summary>
 /// موتور تصادفی قرعه‌کشی: مولد جریان قطعی از Seed تثبیت‌شده (HMAC-SHA256 DRBG) و
 /// انتخاب وزنی بدون سوگیری ناشی از گردکردن.
-/// الگوریتم: ebi-lottery-weighted-v1
+///
+/// الگوریتم: ebi-lottery-weighted-v2
+/// تفاوت با v1: تعهد و زمینهٔ انتخاب به «هش عمومی ورودی‌ها» گره خورده است، نه هش داخلی
+/// مجموعه. بنابراین ممیز مستقل می‌تواند بدون دسترسی به دادهٔ خصوصی فاکتورها، هم تعهد
+/// و هم برنده را از سند عمومی بازتولید کند؛ هش داخلی فقط برای ممیزی محرمانه می‌ماند.
 /// </summary>
 public static class LotteryEngine
 {
-    public const string Algorithm = "ebi-lottery-weighted-v1";
+    public const string Algorithm = "ebi-lottery-weighted-v2";
     public const int SeedBytes = 32;
+
+    /// <summary>طول شناسهٔ مستعار هر ورودی در سند عمومی (هگز).</summary>
+    public const int PseudonymHexLength = 12;
 
     /// <summary>Seed از CSPRNG سیستم (نه System.Random).</summary>
     public static byte[] NewSeed() => RandomNumberGenerator.GetBytes(SeedBytes);
@@ -19,12 +26,14 @@ public static class LotteryEngine
     public static string Hex(byte[] seed) => Convert.ToHexString(seed).ToLowerInvariant();
 
     /// <summary>تعهد منتشرشده پیش از انتخاب: SHA-256(الگوریتم|دوره|هش مجموعه|Seed).</summary>
-    public static string Commitment(int roundNo, string entriesHash, string seedHex)
-        => Security.Sha256Hex($"{Algorithm}|round={roundNo}|entries={entriesHash}|seed={seedHex}");
+    // ورودی این دو تابع باید «هش عمومی ورودی‌ها» باشد تا تعهد و انتخاب با سند عمومی
+    // قابل بازتولید باشند. هش داخلی تنها برای ممیزی محرمانه نگه داشته می‌شود.
+    public static string Commitment(int roundNo, string publicEntriesHash, string seedHex)
+        => Security.Sha256Hex($"{Algorithm}|round={roundNo}|entries={publicEntriesHash}|seed={seedHex}");
 
     /// <summary>زمینهٔ جریان تصادفی؛ به مجموعهٔ تثبیت‌شده و دوره گره خورده است.</summary>
-    public static string Context(int roundNo, string entriesHash)
-        => $"round={roundNo}|entries={entriesHash}";
+    public static string Context(int roundNo, string publicEntriesHash)
+        => $"round={roundNo}|entries={publicEntriesHash}";
 
     /// <summary>قطعهٔ شمارهٔ counter از جریان: HMAC(key=seed, msg=الگوریتم|زمینه|counter).</summary>
     private static byte[] Block(byte[] seed, string context, ulong counter)
@@ -77,7 +86,23 @@ public static class LotteryEngine
         return weights.Count - 1; // از نظر ریاضی دست‌نیافتنی؛ فقط برای اطمینان
     }
 
-    /// <summary>هش مجموعهٔ ورودی‌ها؛ ترتیب، شناسه‌ها، وزن و صلاحیت را تعهد می‌کند.</summary>
+    /// <summary>
+    /// شناسهٔ مستعار یک‌طرفهٔ هر ورودی برای سند عمومی: HMAC(seed, "pseudonym|entry=n").
+    /// از فاکتور، موبایل یا حساب بله هیچ اطلاعاتی برنمی‌گرداند و تنها پس از افشای Seed
+    /// قابل بازتولید است، پس پیش از قرعه‌کشی قابل نقشه‌برداری نیست.
+    /// </summary>
+    public static string Pseudonym(string seedHex, int entryNo)
+        => Security.HmacHex(seedHex, $"pseudonym|entry={entryNo}")[..PseudonymHexLength];
+
+    /// <summary>خط عمومی ورودی: شناسهٔ مستعار، صلاحیت و وزن — بدون هیچ دادهٔ شخصی یا مالی.</summary>
+    public static string PublicEntryLine(int entryNo, string pseudonym, string eligibility, long weight)
+        => $"{entryNo}|{pseudonym}|{eligibility}|{weight}";
+
+    /// <summary>هش عمومی ورودی‌ها؛ همان ورودی‌ها با شناسهٔ مستعار به‌جای دادهٔ خصوصی.</summary>
+    public static string PublicEntriesHash(IEnumerable<string> publicLines)
+        => EntriesHash(publicLines);
+
+    /// <summary>هش مجموعهٔ داخلی (محرمانه، فقط برای ممیزی): ترتیب، شناسه‌ها، وزن و صلاحیت را تعهد می‌کند.</summary>
     public static string EntriesHash(IEnumerable<string> canonicalLines)
     {
         StringBuilder sb = new();
