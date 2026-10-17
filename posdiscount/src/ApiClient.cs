@@ -97,6 +97,8 @@ namespace PosDiscount
                 d["customerCode"] = inv.CustomerCode;
                 d["mobile"] = inv.Mobile;
                 d["status"] = string.Equals(inv.Status, "review", StringComparison.OrdinalIgnoreCase) ? "review" : "valid";
+                d["reviewReason"] = inv.ReviewReason;
+                d["reviewEvidence"] = inv.ReviewEvidence;
                 invoices.Add(d);
             }
             payload["invoices"] = invoices;

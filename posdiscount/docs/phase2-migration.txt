@@ -1,0 +1,4 @@
+LocalStore v3 -> v5 migration on a copy of the committed pos-discount.db
+first=True schema=5 invoices=145 pending=0
+reopen=True schema=5 invoices=145
+MIGRATION V5 OK

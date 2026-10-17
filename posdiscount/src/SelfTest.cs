@@ -581,6 +581,7 @@ namespace PosDiscount
             }
 
             Phase1AgentTests(s, log);
+            Phase2ReconcileTests(s, log);
 
             if (uiShot)
             {

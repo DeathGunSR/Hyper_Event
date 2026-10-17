@@ -23,7 +23,7 @@ REFS='-r:System.dll -r:System.Core.dll -r:System.Data.dll -r:System.Drawing.dll 
 SRC='src\ApiClient.cs src\AppSettings.cs src\CashierSelectForm.cs src\ConnectionFixer.cs src\CsvLog.cs src\CustomerInvoicesForm.cs src\DashboardForm.cs src\DiscountEngine.cs src\HolooDb.cs src\InvoicePopupForm.cs src\LocalStore.cs src\Lottery.cs src\LotteryForm.cs src\Loyalty.cs src\MobileEntryForm.cs src\PointsForm.cs src\Program.cs src\SettingsForm.cs src\SyncAgent.cs src\SyncForm.cs src\Util.cs'
 
 GUI_SRC="$SRC"
-ALL_SRC="$SRC src\\SelfTest.cs src\\Phase1Tests.cs"
+ALL_SRC="$SRC src\\SelfTest.cs src\\Phase1Tests.cs src\\Phase2Tests.cs"
 
 mkdir -p bin/logs bin/x64 bin/x86
 

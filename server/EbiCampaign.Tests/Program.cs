@@ -83,6 +83,9 @@ internal static class Program
             await RunAsync("۲۴. فاکتور Held وقتی دورهٔ باز نیست", NoOpenRoundAsync);
             await RunAsync("۲۵. علامت مشکوک به ابطال از دورهٔ باز حذف می‌کند", ReviewCollectingAsync);
             await RunAsync("۲۶. علامت مشکوک پس از تکمیل شمارش را تغییر نمی‌دهد", ReviewCompletedAsync);
+            await RunAsync("۲۷. دلیل بررسی ذخیره و تأیید مجدد در دورهٔ باز", RevalidateOpenAsync);
+            await RunAsync("۲۸. تأیید مجدد فاکتور تاریخی شمارش را تغییر نمی‌دهد", RevalidateCompletedAsync);
+            await RunAsync("۲۹. تأیید مجدد فاکتور غیربررسی رد می‌شود", RevalidateWrongStatusAsync);
         }
         catch (Exception ex)
         {
@@ -431,6 +434,60 @@ internal static class Program
         Check("شمارش تاریخی تغییر نکرد", (await CurrentRoundAsync()).Count == 1000, "");
     }
 
+    private static async Task RevalidateOpenAsync()
+    {
+        await StartFreshRoundAsync();
+        IngestResponse first = await IngestAsync(AgentA, AgentASecret, NewRequest("rvo-1", Invoice(3001)));
+        long id = first.Results[0].InvoiceId!.Value;
+
+        IngestInvoice suspect = Invoice(3001);
+        suspect.Status = "review";
+        suspect.ReviewReason = "missing";
+        suspect.ReviewEvidence = "source=Holoo1;day=2026-02-01;checks=2";
+        IngestResponse second = await IngestAsync(AgentA, AgentASecret, NewRequest("rvo-2", suspect));
+        Check("دلیل بررسی و شواهد", second.NeedsReview == 1 && second.Results[0].Result == "review", Dump(second));
+
+        HttpResponseMessage list = await AdminGetAsync("/api/v1/admin/invoices?status=NeedsReview&limit=5");
+        string body = await list.Content.ReadAsStringAsync();
+        Check("دلیل در فهرست مدیر دیده می‌شود", body.Contains("\"reviewReason\":\"missing\""), body);
+        Check("شواهد در فهرست مدیر دیده می‌شود", body.Contains("checks=2"), body);
+
+        HttpResponseMessage rv = await AdminPostAsync($"/api/v1/admin/invoices/{id}/revalidate", new { actor = "owner" });
+        RevalidateResult rr = await ReadJsonAsync<RevalidateResult>(rv);
+        Check("تأیید مجدد 200", rv.StatusCode == HttpStatusCode.OK, body);
+        Check("وضعیت Valid شد", rr.Status == "Valid" && rr.CountChanged, DumpRevalidate(rr));
+        Check("شمارنده دوره = 1", (await CurrentRoundAsync()).Count == 1, "");
+    }
+
+    private static async Task RevalidateCompletedAsync()
+    {
+        RoundInfo round = await StartFreshRoundAsync();
+        await SeedValidAsync(round.RoundId, 1000, complete: true);
+
+        IngestInvoice suspect = Invoice(500003);
+        suspect.Status = "review";
+        suspect.ReviewReason = "voided";
+        suspect.ReviewEvidence = "source=Holoo1;type=3";
+        IngestResponse rev = await IngestAsync(AgentA, AgentASecret, NewRequest("rvc-1", suspect));
+        Check("فاکتور تاریخی بررسی شد", rev.NeedsReview == 1, Dump(rev));
+
+        long id = rev.Results[0].InvoiceId!.Value;
+        HttpResponseMessage rv = await AdminPostAsync($"/api/v1/admin/invoices/{id}/revalidate", new { actor = "owner" });
+        RevalidateResult rr = await ReadJsonAsync<RevalidateResult>(rv);
+        Check("تأیید مجدد تاریخی 200", rv.StatusCode == HttpStatusCode.OK, DumpRevalidate(rr));
+        Check("شمارش تاریخی تغییر نکرد", !rr.CountChanged && rr.RoundCount == 1000, DumpRevalidate(rr));
+        Check("شمارنده همچنان 1000", (await CurrentRoundAsync()).Count == 1000, "");
+    }
+
+    private static async Task RevalidateWrongStatusAsync()
+    {
+        await StartFreshRoundAsync();
+        IngestResponse first = await IngestAsync(AgentA, AgentASecret, NewRequest("rvw-1", Invoice(3002)));
+        long id = first.Results[0].InvoiceId!.Value;
+        HttpResponseMessage rv = await AdminPostAsync($"/api/v1/admin/invoices/{id}/revalidate", new { actor = "owner" });
+        Check("تأیید مجدد غیربررسی = 409", rv.StatusCode == HttpStatusCode.Conflict, await rv.Content.ReadAsStringAsync());
+    }
+
     // ------------------------------------------------------------------
     //  helpers
     // ------------------------------------------------------------------
@@ -625,4 +682,7 @@ END;", cn);
     private static string Dump(IngestResponse r)
         => $"accepted={r.Accepted} dup={r.Duplicates} upd={r.Updated} held={r.Held} review={r.NeedsReview} oos={r.OutOfScope} conflict={r.Conflicts}"
            + (r.Results.Count > 0 ? $" | {r.Results[0].Result}: {r.Results[0].Message}" : "");
+
+    private static string DumpRevalidate(RevalidateResult r)
+        => $"status={r.Status} round={r.RoundId} count={r.RoundCount} changed={r.CountChanged}";
 }

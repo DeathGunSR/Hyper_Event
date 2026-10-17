@@ -37,7 +37,7 @@ namespace PosDiscount
             {
                 string err;
                 Expect(log, "باز شدن دیتابیس محلی نسخه ۴", store.Open(out err) ? 1 : 0, 1);
-                Expect(log, "نسخهٔ اسکیما = ۴", Num.ParseI(store.GetMetaValue("SchemaVersion"), 0), 4);
+                Expect(log, "نسخهٔ اسکیما = ۵", Num.ParseI(store.GetMetaValue("SchemaVersion"), 0), 5);
 
                 StoredInvoice inv = store.SaveInvoice(Fake(7001, 5000000, "09120007001", "مشتری تست"), 0, t);
                 Expect(log, "ذخیرهٔ فاکتور در دیتابیس محلی", inv == null ? -1 : 1, 1);
@@ -68,15 +68,25 @@ namespace PosDiscount
 
                 store.SaveInvoice(Fake(7002, 5000000, "09120007002", "مشتری ۲"), 0, t);
                 store.SaveInvoice(Fake(7003, 5000000, "09120007003", "مشتری ۳"), 0, t);
-                HashSet<long> source = new HashSet<long>();
-                source.Add(7001);
-                source.Add(7002);
-                int marked = SyncAgent.MarkMissingAsReview(store, FmtDate.G2(DateTime.Today), source);
-                Expect(log, "تطبیق روزانه: یک فاکتور غایب مشکوک شد", marked, 1);
-                ExpectStr(log, "وضعیت فاکتور غایب", store.Read(7003).Status, "review");
+                SourceSnapshot snap = new SourceSnapshot();
+                snap.From = DateTime.Today;
+                snap.To = DateTime.Today;
+                snap.LiveRows = 2;
+                snap.DaysWithRows.Add(FmtDate.G2(DateTime.Today));
+                AddSource(snap, 7001, 2, 5000000);
+                AddSource(snap, 7002, 2, 5000000);
+
+                ReconcileReport firstCheck = SyncAgent.Reconcile(store, DateTime.Today, DateTime.Today, snap, 2, DateTime.Now);
+                ExpectStr(log, "اولین غیبت فقط ثبت می‌شود", store.Read(7003).Status, "valid");
+                Expect(log, "غیبت در انتظار تأیید دوم", firstCheck.Missing, 1);
+
+                ReconcileReport secondCheck = SyncAgent.Reconcile(store, DateTime.Today, DateTime.Today, snap, 2, DateTime.Now);
+                Expect(log, "تطبیق: فاکتور غایب پس از دو مشاهده بررسی شد",
+                    string.Equals(store.Read(7003).Status, "review", StringComparison.OrdinalIgnoreCase) ? 1 : 0, 1);
+                ExpectStr(log, "دلیل بررسی = missing", store.Read(7003).ReviewReason, "missing");
                 ExpectStr(log, "فاکتور موجود دست‌نخورده", store.Read(7002).Status, "valid");
-                int markedAgain = SyncAgent.MarkMissingAsReview(store, FmtDate.G2(DateTime.Today), source);
-                Expect(log, "تطبیق تکراری صف را دوباره پر نمی‌کند", markedAgain, 0);
+                ReconcileReport thirdCheck = SyncAgent.Reconcile(store, DateTime.Today, DateTime.Today, snap, 2, DateTime.Now);
+                Expect(log, "تطبیق تکراری صف را دوباره پر نمی‌کند", thirdCheck.Marked, 0);
             }
             finally
             {
@@ -118,7 +128,7 @@ namespace PosDiscount
                 string err;
                 pushStore.Open(out err);
                 pushStore.SaveInvoice(Fake(8001, 5000000, "09120008001", "مشتری ارسال"), 0, t);
-                pushStore.SetInvoiceStatus(8001, "review");
+                pushStore.SetReview(8001, "missing", "source=Holoo1;test");
                 pushStore.EnqueueSync(8001);
 
                 server = new TestHttpServer(200,
@@ -140,6 +150,8 @@ namespace PosDiscount
                 Expect(log, "بدنه شامل همان فاکتور بود", server.Body.IndexOf("\"fCode\":8001", StringComparison.Ordinal) >= 0 ? 1 : 0, 1);
                 Expect(log, "وضعیت مشکوک به ابطال در بدنه ارسال شد",
                     server.Body.IndexOf("\"status\":\"review\"", StringComparison.Ordinal) >= 0 ? 1 : 0, 1);
+                Expect(log, "دلیل بررسی در بدنه ارسال شد",
+                    server.Body.IndexOf("\"reviewReason\":\"missing\"", StringComparison.Ordinal) >= 0 ? 1 : 0, 1);
                 ExpectStr(log, "وضعیت سرور برای فاکتور ذخیره شد", pushStore.Read(8001).ServerStatus, "Valid");
 
                 // خطای سرور: باید ناموفق بماند و پیام خطا ذخیره شود
@@ -268,6 +280,18 @@ namespace PosDiscount
             }
 
             try { Directory.Delete(dir, true); } catch (Exception) { }
+        }
+
+        private static void AddSource(SourceSnapshot snap, long fCode, int fType, double gross)
+        {
+            SourceInvoiceState st = new SourceInvoiceState();
+            st.FCode = fCode;
+            st.FCodeC = fCode;
+            st.FType = fType;
+            st.Date = DateTime.Today;
+            st.Gross = gross;
+            st.FromLive = true;
+            snap.ByCode[fCode] = st;
         }
 
         /// <summary>سرور HTTP حداقلی روی 127.0.0.1 برای آزمون امضا و ارسال (بدون نیاز به مجوز URL).</summary>

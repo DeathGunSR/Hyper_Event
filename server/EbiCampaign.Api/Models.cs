@@ -26,6 +26,10 @@ public sealed class IngestInvoice
     public string? Mobile { get; set; }
     /// <summary>"valid" (پیش‌فرض) یا "review" برای فاکتور مشکوک.</summary>
     public string? Status { get; set; }
+    /// <summary>missing | voided | invalid — دلیل بررسی از عامل صندوق.</summary>
+    public string? ReviewReason { get; set; }
+    /// <summary>شواهد کوتاه تطبیق (منبع، پنجره، روز، نوع) برای حسابرسی.</summary>
+    public string? ReviewEvidence { get; set; }
 }
 
 public sealed class IngestResponse
@@ -117,7 +121,20 @@ public sealed class InvoiceRow
     public int? RoundId { get; set; }
     public string? Mobile { get; set; }
     public string? VoidReason { get; set; }
+    public string? ReviewReason { get; set; }
+    public string? ReviewEvidence { get; set; }
     public DateTime ReceivedAt { get; set; }
+}
+
+public sealed class RevalidateResult
+{
+    public long InvoiceId { get; set; }
+    public long FCode { get; set; }
+    public string Status { get; set; } = "";
+    public int? RoundId { get; set; }
+    public int RoundCount { get; set; }
+    public bool CountChanged { get; set; }
+    public string Message { get; set; } = "";
 }
 
 public sealed class VoidResult

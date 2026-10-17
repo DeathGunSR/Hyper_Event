@@ -13,6 +13,34 @@ namespace PosDiscount
         public int Pending;
         public bool Ok;
         public string Message = "";
+        public string ReconcileMessage = "";
+    }
+
+    /// <summary>خلاصهٔ یک دور تطبیق تاریخی (برای لاگ و نمایش در فرم همگام‌سازی).</summary>
+    public class ReconcileReport
+    {
+        public DateTime At;
+        public DateTime From;
+        public DateTime To;
+        public int Checked;
+        public int Marked;
+        public int Missing;
+        public int Voided;
+        public int Invalid;
+        public int Confirmed;
+        public int SkippedDays;
+        public bool SourceEmpty;
+        public string Message = "";
+
+        public string ToMeta()
+        {
+            return "at=" + At.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)
+                + ";from=" + From.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                + ";to=" + To.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)
+                + ";checked=" + Checked + ";marked=" + Marked + ";missing=" + Missing
+                + ";voided=" + Voided + ";invalid=" + Invalid + ";confirmed=" + Confirmed
+                + ";skippedDays=" + SkippedDays + ";sourceEmpty=" + (SourceEmpty ? 1 : 0);
+        }
     }
 
     /// <summary>
@@ -64,37 +92,42 @@ namespace PosDiscount
             }
             try
             {
+                string pullError = "";
                 try
                 {
                     result.Pulled = PullNewInvoices();
-                    ReconcileIfDue();
                 }
                 catch (Exception ex)
                 {
-                    result.Ok = false;
-                    result.Message = "خواندن فاکتورها از هلو ناموفق بود: " + ex.Message;
-                    LastOk = false;
-                    LastMessage = result.Message;
-                    LastRun = DateTime.Now;
-                    return result;
+                    pullError = "خواندن فاکتورها از هلو ناموفق بود: " + ex.Message;
+                    CsvLog.Error(_s, "sync pull: " + ex.ToString());
                 }
 
+                // تطبیق مستقل از ارسال است؛ خطای منبع، صف ارسال را متوقف نمی‌کند.
+                result.ReconcileMessage = ReconcileIfDue();
+
+                string pushError = "";
                 try
                 {
                     result.Sent = PushQueue(out result.Pending);
-                    result.Ok = true;
-                    result.Message = "دریافت " + result.Pulled + " فاکتور جدید | ارسال " + result.Sent
-                        + " | در صف: " + result.Pending;
-                    if (result.Sent == 0 && result.Pulled == 0)
-                        result.Message = "همه‌چیز به‌روز است (در صف: " + result.Pending + ")";
                 }
                 catch (Exception ex)
                 {
-                    result.Ok = false;
+                    pushError = "ارسال به سرور ناموفق بود: " + ex.Message;
                     SyncStats st = _store.GetSyncStats();
                     result.Pending = st.Pending;
-                    result.Message = "ارسال به سرور ناموفق بود: " + ex.Message;
+                    CsvLog.Error(_s, "sync push: " + ex.ToString());
                 }
+
+                result.Ok = pullError.Length == 0 && pushError.Length == 0;
+                if (pullError.Length > 0) result.Message = pullError;
+                if (pushError.Length > 0)
+                    result.Message = (result.Message.Length > 0 ? result.Message + " | " : "") + pushError;
+                string normal = "دریافت " + result.Pulled + " فاکتور جدید | ارسال " + result.Sent
+                    + " | در صف: " + result.Pending;
+                if (result.Ok && result.Sent == 0 && result.Pulled == 0)
+                    normal = "همه‌چیز به‌روز است (در صف: " + result.Pending + ")";
+                result.Message = result.Message.Length > 0 ? result.Message + " | " + normal : normal;
 
                 LastOk = result.Ok;
                 LastMessage = result.Message;
@@ -214,46 +247,186 @@ namespace PosDiscount
         }
 
         /// <summary>
-        /// تطبیق روزانه (حداکثر هر ۶۰ دقیقه): فاکتورهای محلی که در منبع نیستند «مشکوک به ابطال» می‌شوند.
-        /// این کار در دوره‌های بسته، شمارش تاریخی را تغییر نمی‌دهد و فقط برای بررسی مدیریتی است.
+        /// تطبیق تاریخی قابل پیکربندی. فقط در صورت موفقیت کامل منبع، وضعیت محلی را تغییر می‌دهد؛
+        /// خطای اتصال یا بازهٔ خالی منبع به‌عنوان «ابطال قطعی» تفسیر نمی‌شود.
         /// </summary>
-        private void ReconcileIfDue()
+        private string ReconcileIfDue()
         {
+            DateTime now = DateTime.Now;
             DateTime last;
             string raw = _store.GetMetaValue("LastReconcileAt");
+            int interval = _s.ReconcileIntervalMinutes > 0 ? _s.ReconcileIntervalMinutes : 60;
             if (DateTime.TryParseExact(raw, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture,
-                    DateTimeStyles.None, out last) && DateTime.Now - last < TimeSpan.FromMinutes(60))
-                return;
+                    DateTimeStyles.None, out last) && now - last < TimeSpan.FromMinutes(interval))
+                return "";
 
-            DateTime day = _db.GetWorkDay();
-            HashSet<long> source = _db.GetInvoiceCodesForDay(day);
-            int marked = MarkMissingAsReview(_store, day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), source);
-            _store.SetMetaValue("LastReconcileAt", DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
-            if (marked > 0)
-                CsvLog.Info(_s, "sync reconcile: " + marked + " فاکتور مشکوک به ابطال علامت خورد (روز "
-                    + day.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) + ")");
+            // در صورت خطا، حداکثر هر ۵ دقیقه تلاش مجدد؛ نه هر ۳۰ ثانیه.
+            DateTime lastTry;
+            string rawTry = _store.GetMetaValue("LastReconcileAttempt");
+            if (DateTime.TryParseExact(rawTry, "yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture,
+                    DateTimeStyles.None, out lastTry) && now - lastTry < TimeSpan.FromMinutes(5))
+                return "";
+            _store.SetMetaValue("LastReconcileAttempt", now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+
+            int days = _s.ReconcileDays > 0 ? _s.ReconcileDays : 7;
+            if (days > 30) days = 30;
+            int confirmations = _s.ReconcileConfirmations > 0 ? _s.ReconcileConfirmations : 2;
+            if (confirmations > 5) confirmations = 5;
+
+            try
+            {
+                DateTime end = _db.GetWorkDay().Date;
+                DateTime campaignStart;
+                if (!DateTime.TryParseExact(_s.CampaignStartDate, "yyyy-MM-dd", CultureInfo.InvariantCulture,
+                        DateTimeStyles.None, out campaignStart))
+                    campaignStart = end.AddDays(-(days - 1));
+                DateTime start = end.AddDays(-(days - 1));
+                if (start < campaignStart) start = campaignStart;
+
+                if (end < start)
+                    return "تطبیق انجام نشد: بازهٔ تاریخ نامعتبر است.";
+
+                SourceSnapshot snap = _db.GetSourceSnapshot(start, end);
+                ReconcileReport rep = Reconcile(_store, start, end, snap, confirmations, now);
+                _store.SetMetaValue("LastReconcileSummary", rep.ToMeta());
+
+                if (rep.SourceEmpty)
+                {
+                    string emptyMsg = "منبع هلو برای بازهٔ " + Fmt(start) + " تا " + Fmt(end)
+                        + " هیچ فاکتوری برنگرداند؛ هیچ تغییری اعمال نشد.";
+                    _store.SetMetaValue("LastReconcileError", emptyMsg);
+                    CsvLog.Info(_s, "sync reconcile: " + emptyMsg);
+                    return emptyMsg;
+                }
+
+                _store.SetMetaValue("LastReconcileAt", now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture));
+                _store.SetMetaValue("LastReconcileError", "");
+                CsvLog.Info(_s, "sync reconcile: " + rep.Message);
+                return rep.Message;
+            }
+            catch (Exception ex)
+            {
+                string msg = "تطبیق تاریخی ناموفق بود (هیچ تغییری اعمال نشد): " + ex.Message;
+                _store.SetMetaValue("LastReconcileError", msg);
+                CsvLog.Error(_s, "sync reconcile: " + ex.ToString());
+                return msg;
+            }
+        }
+
+        private static string Fmt(DateTime d)
+        {
+            return d.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
         }
 
         /// <summary>
-        /// تطبیق: فاکتورهای محلی یک روز که در منبع نیستند، «مشکوک به ابطال» علامت می‌خورند
-        /// و دوباره در صف ارسال قرار می‌گیرند تا سرور آن‌ها را NeedsReview ثبت کند.
-        /// حذف فیزیکی انجام نمی‌شود.
+        /// مقایسهٔ محلی با عکس فوری منبع. «غایب بودن» فقط با چند مشاهدهٔ پیوسته بررسی می‌شود؛
+        /// نوع ۳ ابطال قطعی و نوع نامعتبر/مبلغ غیرمثبت «نامعتبر» است. هیچ حذفی انجام نمی‌شود.
         /// </summary>
-        public static int MarkMissingAsReview(LocalStore store, string dayYmd, HashSet<long> sourceCodes)
+        public static ReconcileReport Reconcile(LocalStore store, DateTime from, DateTime to,
+            SourceSnapshot snap, int confirmations, DateTime now)
         {
-            if (store == null) return 0;
-            List<StoredInvoice> local = store.GetInvoicesOnDay(dayYmd);
-            int marked = 0;
+            ReconcileReport rep = new ReconcileReport();
+            rep.At = now;
+            rep.From = from.Date;
+            rep.To = to.Date;
+            if (store == null) { rep.Message = "دیتابیس محلی باز نیست."; return rep; }
+            if (confirmations < 1) confirmations = 1;
+            if (confirmations > 5) confirmations = 5;
+
+            List<ReconcileRow> local = store.GetReconcileRows(Fmt(from), Fmt(to));
+            HashSet<string> skippedDays = new HashSet<string>();
+            string window = Fmt(from) + ".." + Fmt(to);
+
             for (int i = 0; i < local.Count; i++)
             {
-                if (sourceCodes != null && sourceCodes.Contains(local[i].FCode)) continue;
-                // یک بار علامت بزن و همان یک بار را به سرور بفرست؛ نه هر ساعت دوباره.
-                if (string.Equals(local[i].Status, "review", StringComparison.OrdinalIgnoreCase)) continue;
-                store.SetInvoiceStatus(local[i].FCode, "review");
-                store.EnqueueSync(local[i].FCode);
-                marked++;
+                ReconcileRow row = local[i];
+                rep.Checked++;
+
+                SourceInvoiceState src = null;
+                bool found = snap != null && snap.ByCode.TryGetValue(row.FCode, out src);
+                string baseEvidence = "source=Holoo1;window=" + window + ";day=" + row.FDate
+                    + ";at=" + Fmt(now) + " " + now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+
+                if (found && src.IsValidSale)
+                {
+                    if (string.Equals(row.Status, "review", StringComparison.OrdinalIgnoreCase))
+                    {
+                        rep.Confirmed++;
+                        store.SetReviewEvidence(row.FCode, baseEvidence + ";state=confirmed-valid;table=" + src.TableLabel);
+                    }
+                    else if (row.MissingChecks > 0)
+                    {
+                        store.ClearMissingProbe(row.FCode);
+                    }
+                    continue;
+                }
+
+                if (found && src.IsVoided)
+                {
+                    rep.Voided++;
+                    if (store.SetReview(row.FCode, "voided",
+                        baseEvidence + ";state=voided;type=3;table=" + src.TableLabel))
+                    {
+                        store.EnqueueSync(row.FCode);
+                        rep.Marked++;
+                    }
+                    continue;
+                }
+
+                if (found)
+                {
+                    rep.Invalid++;
+                    if (store.SetReview(row.FCode, "invalid",
+                        baseEvidence + ";state=invalid;type=" + src.FType + ";gross=" + src.Gross.ToString("0.##", CultureInfo.InvariantCulture)
+                        + ";table=" + src.TableLabel))
+                    {
+                        store.EnqueueSync(row.FCode);
+                        rep.Marked++;
+                    }
+                    continue;
+                }
+
+                // کد در هیچ‌کدام از دو جدول پیدا نشد. اگر آن روز در منبع هیچ ردیفی نداشته باشد،
+                // منبع را ناقص می‌دانیم و برای آن روز هیچ تصمیمی نمی‌گیریم.
+                if (snap == null || !snap.DaysWithRows.Contains(row.FDate))
+                {
+                    skippedDays.Add(row.FDate);
+                    continue;
+                }
+
+                rep.Missing++;
+                if (string.Equals(row.Status, "review", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (!string.Equals(row.ReviewReason, "missing", StringComparison.OrdinalIgnoreCase))
+                        store.SetReview(row.FCode, "missing", baseEvidence + ";state=missing;checks=already-review");
+                    continue;
+                }
+
+                int checks = row.MissingChecks + 1;
+                if (checks >= confirmations)
+                {
+                    if (store.SetReview(row.FCode, "missing",
+                        baseEvidence + ";state=missing;checks=" + checks + ";confirmation=reached"))
+                    {
+                        store.EnqueueSync(row.FCode);
+                        rep.Marked++;
+                    }
+                }
+                else
+                {
+                    store.SetMissingProbe(row.FCode, checks,
+                        baseEvidence + ";state=missing-pending;checks=" + checks + "/" + confirmations);
+                }
             }
-            return marked;
+
+            rep.SkippedDays = skippedDays.Count;
+            rep.SourceEmpty = snap == null || (snap.LiveRows == 0 && snap.ArchiveRows == 0);
+            rep.Message = "تطبیق " + Fmt(from) + " تا " + Fmt(to) + ": بررسی " + rep.Checked
+                + " | جدید بررسی: " + rep.Marked + " | غایب: " + rep.Missing
+                + " | ابطال: " + rep.Voided + " | نامعتبر: " + rep.Invalid
+                + " | تأییدشده: " + rep.Confirmed
+                + (rep.SkippedDays > 0 ? " | روزهای ناقص: " + rep.SkippedDays : "");
+            return rep;
         }
     }
 }

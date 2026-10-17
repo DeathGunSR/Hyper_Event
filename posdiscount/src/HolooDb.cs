@@ -53,6 +53,43 @@ namespace PosDiscount
         }
     }
 
+    /// <summary>وضعیت یک فاکتور در منبع هلو در بازهٔ تطبیق (جدول روز یا تاریخچه).</summary>
+    public class SourceInvoiceState
+    {
+        public long FCode;
+        public long FCodeC;
+        public int FType;
+        public DateTime Date;
+        public int UserCode;
+        public double Gross;
+        public bool FromLive;
+        public bool FromArchive;
+
+        public string TableLabel
+        {
+            get
+            {
+                if (FromLive && FromArchive) return "both";
+                return FromLive ? "live" : (FromArchive ? "archive" : "none");
+            }
+        }
+
+        /// <summary>فروش معتبر: نوع ۲ و مبلغ مثبت. ابطال/برگشتی نوع ۳ است.</summary>
+        public bool IsValidSale { get { return FType == 2 && Gross > 0; } }
+        public bool IsVoided { get { return FType == 3; } }
+    }
+
+    /// <summary>عکس فوری فقط‌خواندنی از کدهای یک بازهٔ تاریخ در هلو.</summary>
+    public class SourceSnapshot
+    {
+        public DateTime From;
+        public DateTime To;
+        public Dictionary<long, SourceInvoiceState> ByCode = new Dictionary<long, SourceInvoiceState>();
+        public HashSet<string> DaysWithRows = new HashSet<string>();
+        public int LiveRows;
+        public int ArchiveRows;
+    }
+
     public class DaySummary
     {
         public DateTime Day;
@@ -314,6 +351,70 @@ SELECT F_Code FROM dbo.Rs_Facture WHERE F_Type <> 3 AND F_Date = @d", c))
                     while (dr.Read()) set.Add(Convert.ToInt64(dr.GetValue(0)));
             }
             return set;
+        }
+
+        /// <summary>
+        /// خواندن همهٔ کدهای یک بازهٔ تاریخ از جدول روز و تاریخچه (فقط خواندنی).
+        /// این متد برای تطبیق تاریخی استفاده می‌شود و برخلاف GetInvoiceCodesForDay فقط یک روز نیست.
+        /// اگر کوئری خطا بدهد استثنا بالا می‌رود تا تطبیق، منبع ناقص را «قطعی» فرض نکند.
+        /// </summary>
+        public SourceSnapshot GetSourceSnapshot(DateTime from, DateTime to)
+        {
+            if (to < from) { DateTime t = from; from = to; to = t; }
+            SourceSnapshot snap = new SourceSnapshot();
+            snap.From = from.Date;
+            snap.To = to.Date;
+
+            using (SqlConnection c = Open())
+            using (SqlCommand cmd = new SqlCommand(@"
+SELECT 'live' AS Src, F_Code, F_Code_C, F_Type, F_Date, UserCode, F_SumPrice
+FROM dbo.Res_Facture
+WHERE F_Date >= @from AND F_Date <= @to
+UNION ALL
+SELECT 'archive', F_Code, F_Code_C, F_Type, F_Date, UserCode, F_SumPrice
+FROM dbo.Rs_Facture
+WHERE F_Date >= @from AND F_Date <= @to", c))
+            {
+                cmd.Parameters.Add("@from", SqlDbType.SmallDateTime).Value = snap.From;
+                cmd.Parameters.Add("@to", SqlDbType.SmallDateTime).Value = snap.To;
+                using (SqlDataReader r = cmd.ExecuteReader())
+                {
+                    while (r.Read())
+                    {
+                        bool live = string.Equals(Src(r, 0), "live", StringComparison.Ordinal);
+                        long code = Convert.ToInt64(r.GetValue(1));
+                        SourceInvoiceState st;
+                        if (!snap.ByCode.TryGetValue(code, out st))
+                        {
+                            st = new SourceInvoiceState();
+                            st.FCode = code;
+                            snap.ByCode[code] = st;
+                        }
+
+                        // اگر همان کد در هر دو جدول بود، نسخهٔ جدول روز مرجع است.
+                        if (live) st.FromLive = true; else st.FromArchive = true;
+                        if (live || !st.FromLive)
+                        {
+                            st.FCodeC = r.IsDBNull(2) ? 0 : Convert.ToInt64(r.GetValue(2));
+                            st.FType = r.IsDBNull(3) ? 0 : Convert.ToInt32(r.GetValue(3));
+                            st.Date = r.IsDBNull(4) ? DateTime.MinValue : Convert.ToDateTime(r.GetValue(4));
+                            st.UserCode = r.IsDBNull(5) ? 0 : Convert.ToInt32(r.GetValue(5));
+                            st.Gross = r.IsDBNull(6) ? 0 : Convert.ToDouble(r.GetValue(6), CultureInfo.InvariantCulture);
+                        }
+
+                        if (live) snap.LiveRows++; else snap.ArchiveRows++;
+                        if (!r.IsDBNull(4))
+                            snap.DaysWithRows.Add(Convert.ToDateTime(r.GetValue(4)).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+                    }
+                }
+            }
+            return snap;
+        }
+
+        private static string Src(SqlDataReader r, int i)
+        {
+            if (r.IsDBNull(i)) return "";
+            return Convert.ToString(r.GetValue(i), CultureInfo.InvariantCulture);
         }
 
         /// <summary>بزرگ‌ترین F_Code در جدول روز و تاریخچه.</summary>

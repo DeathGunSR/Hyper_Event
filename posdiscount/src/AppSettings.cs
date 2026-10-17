@@ -74,6 +74,10 @@ namespace PosDiscount
         public int SyncIntervalSeconds = 30;
         public int SyncBatchSize = 100;
         public int ApiTimeoutSeconds = 20;
+        // ---------- تطبیق تاریخی (ابطال/غیبت) ----------
+        public int ReconcileDays = 7;              // چند روز گذشته بررسی شود (۱..۳۰)
+        public int ReconcileIntervalMinutes = 60;  // فاصلهٔ بین تطبیق‌های موفق
+        public int ReconcileConfirmations = 2;     // چند مشاهدهٔ غیبت برای ورود به بررسی
 
         // ---------- نمایش ----------
         public int AutoCloseSeconds = 30;
@@ -229,10 +233,19 @@ namespace PosDiscount
             s.SyncIntervalSeconds = Num.ParseI(GetS(root, "SyncIntervalSeconds", "30"), s.SyncIntervalSeconds);
             s.SyncBatchSize = Num.ParseI(GetS(root, "SyncBatchSize", "100"), s.SyncBatchSize);
             s.ApiTimeoutSeconds = Num.ParseI(GetS(root, "ApiTimeoutSeconds", "20"), s.ApiTimeoutSeconds);
+            s.ReconcileDays = Num.ParseI(GetS(root, "ReconcileDays", "7"), s.ReconcileDays);
+            s.ReconcileIntervalMinutes = Num.ParseI(GetS(root, "ReconcileIntervalMinutes", "60"), s.ReconcileIntervalMinutes);
+            s.ReconcileConfirmations = Num.ParseI(GetS(root, "ReconcileConfirmations", "2"), s.ReconcileConfirmations);
             if (s.SyncIntervalSeconds < 5) s.SyncIntervalSeconds = 5;
             if (s.SyncBatchSize < 1) s.SyncBatchSize = 1;
             if (s.SyncBatchSize > 500) s.SyncBatchSize = 500;
             if (s.ApiTimeoutSeconds < 5) s.ApiTimeoutSeconds = 5;
+            if (s.ReconcileDays < 1) s.ReconcileDays = 1;
+            if (s.ReconcileDays > 30) s.ReconcileDays = 30;
+            if (s.ReconcileIntervalMinutes < 5) s.ReconcileIntervalMinutes = 5;
+            if (s.ReconcileIntervalMinutes > 1440) s.ReconcileIntervalMinutes = 1440;
+            if (s.ReconcileConfirmations < 1) s.ReconcileConfirmations = 1;
+            if (s.ReconcileConfirmations > 5) s.ReconcileConfirmations = 5;
 
             s.AutoCloseSeconds = Num.ParseI(GetS(root, "AutoCloseSeconds", "30"), s.AutoCloseSeconds);
             s.PlaySound = Num.ParseB(GetS(root, "PlaySound", "true"), s.PlaySound);
@@ -336,6 +349,9 @@ namespace PosDiscount
             Add(doc, root, "SyncIntervalSeconds", SyncIntervalSeconds.ToString(CultureInfo.InvariantCulture));
             Add(doc, root, "SyncBatchSize", SyncBatchSize.ToString(CultureInfo.InvariantCulture));
             Add(doc, root, "ApiTimeoutSeconds", ApiTimeoutSeconds.ToString(CultureInfo.InvariantCulture));
+            Add(doc, root, "ReconcileDays", ReconcileDays.ToString(CultureInfo.InvariantCulture));
+            Add(doc, root, "ReconcileIntervalMinutes", ReconcileIntervalMinutes.ToString(CultureInfo.InvariantCulture));
+            Add(doc, root, "ReconcileConfirmations", ReconcileConfirmations.ToString(CultureInfo.InvariantCulture));
 
             Add(doc, root, "AutoCloseSeconds", AutoCloseSeconds.ToString(CultureInfo.InvariantCulture));
             Add(doc, root, "PlaySound", PlaySound ? "true" : "false");
@@ -367,6 +383,9 @@ namespace PosDiscount
             c.SyncIntervalSeconds = SyncIntervalSeconds;
             c.SyncBatchSize = SyncBatchSize;
             c.ApiTimeoutSeconds = ApiTimeoutSeconds;
+            c.ReconcileDays = ReconcileDays;
+            c.ReconcileIntervalMinutes = ReconcileIntervalMinutes;
+            c.ReconcileConfirmations = ReconcileConfirmations;
             c.Tiers = new List<DiscountTier>();
             for (int i = 0; i < Tiers.Count; i++)
                 c.Tiers.Add(new DiscountTier(Tiers[i].MinAmount, Tiers[i].Percent, Tiers[i].Amount));

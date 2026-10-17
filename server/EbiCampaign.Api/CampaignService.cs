@@ -229,18 +229,24 @@ WHERE RequestId=@id;", cn, tx))
                             released = true;
                         }
 
+                        string reviewReason = CleanReviewReason(inv.ReviewReason);
+                        if (reviewReason.Length == 0) reviewReason = released ? "missing" : "source";
+                        string reviewEvidence = Trim400(inv.ReviewEvidence);
                         using (SqlCommand upd = new(@"
 UPDATE dbo.Invoices
-SET Status='NeedsReview', RoundId = CASE WHEN @release = 1 THEN NULL ELSE RoundId END
+SET Status='NeedsReview', RoundId = CASE WHEN @release = 1 THEN NULL ELSE RoundId END,
+    ReviewReason=@reason, ReviewEvidence=@evidence
 WHERE InvoiceId=@id", cn, tx))
                         {
                             upd.Parameters.AddWithValue("@release", released ? 1 : 0);
+                            upd.Parameters.AddWithValue("@reason", reviewReason);
+                            upd.Parameters.AddWithValue("@evidence", (object?)reviewEvidence ?? DBNull.Value);
                             upd.Parameters.AddWithValue("@id", ex.InvoiceId);
                             await upd.ExecuteNonQueryAsync(ct);
                         }
 
                         await AuditAsync(cn, tx, agentId, "invoice.review", "Invoice", ex.InvoiceId.ToString(),
-                            new { fCode = inv.FCode, countDecremented = released, requiresReview = !released }, ct);
+                            new { fCode = inv.FCode, countDecremented = released, requiresReview = !released, reason = reviewReason }, ct);
                         res.NeedsReview++;
                         res.Results.Add(new InvoiceResult
                         {
@@ -318,11 +324,17 @@ UPDATE dbo.Invoices SET Mobile=@m, Points=@p WHERE InvoiceId=@id AND (Mobile IS 
                 else if (decided == "NeedsReview") res.NeedsReview++;
                 else res.OutOfScope++;
 
+                string newReviewReason = status == "NeedsReview" ? CleanReviewReason(inv.ReviewReason) : "";
+                if (status == "NeedsReview" && newReviewReason.Length == 0) newReviewReason = "source";
+                string newReviewEvidence = status == "NeedsReview" ? Trim400(inv.ReviewEvidence) : "";
+
                 long id;
                 using (SqlCommand ins = new(@"
 INSERT INTO dbo.Invoices(SourceId, FCode, FCodeC, FType, FDate, Jalali, FTime, UserCode, Cashier,
-    Gross, Discount, Net, CustomerCode, Mobile, Points, Status, RoundId, AgentId, ReceivedAt)
-VALUES(@src, @f, @fc, @ft, @fd, @j, @t, @u, @cashier, @g, @d, @n, @cc, @m, @p, @st, @rid, @agent, @now);
+    Gross, Discount, Net, CustomerCode, Mobile, Points, Status, RoundId, AgentId, ReceivedAt,
+    ReviewReason, ReviewEvidence)
+VALUES(@src, @f, @fc, @ft, @fd, @j, @t, @u, @cashier, @g, @d, @n, @cc, @m, @p, @st, @rid, @agent, @now,
+    @rr, @re);
 SELECT CAST(SCOPE_IDENTITY() AS BIGINT);", cn, tx))
                 {
                     ins.Parameters.AddWithValue("@src", _opt.SourceId);
@@ -347,6 +359,8 @@ SELECT CAST(SCOPE_IDENTITY() AS BIGINT);", cn, tx))
                     ins.Parameters.AddWithValue("@rid", (object?)roundId ?? DBNull.Value);
                     ins.Parameters.AddWithValue("@agent", agentId);
                     ins.Parameters.Add("@now", SqlDbType.DateTime2).Value = now;
+                    ins.Parameters.AddWithValue("@rr", newReviewReason.Length == 0 ? (object)DBNull.Value : newReviewReason);
+                    ins.Parameters.AddWithValue("@re", newReviewEvidence.Length == 0 ? (object)DBNull.Value : newReviewEvidence);
                     id = Convert.ToInt64(await ins.ExecuteScalarAsync(ct));
                 }
 
@@ -593,6 +607,127 @@ UPDATE dbo.Rounds SET [Count] = CASE WHEN [Count] > 0 THEN [Count] - 1 ELSE 0 EN
         }
     }
 
+    /// <summary>
+    /// تأیید صریح یک فاکتور در وضعیت NeedsReview. اگر شمارش آن قبلاً آزاد شده باشد،
+    /// به دورهٔ باز (در صورت ظرفیت) اضافه می‌شود؛ در غیر این صورت Held می‌ماند.
+    /// برای فاکتور تاریخی، شمارش دوره دست‌نخورده می‌ماند.
+    /// </summary>
+    public async Task<RevalidateResult> RevalidateInvoiceAsync(long invoiceId, string actor, CancellationToken ct = default)
+    {
+        actor = CleanActor(actor);
+        await using SqlConnection cn = await _db.OpenAsync(ct);
+        await using SqlTransaction tx = (SqlTransaction)await cn.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+        try
+        {
+            long fCode; string status; int? roundId;
+            using (SqlCommand q = new(@"
+SELECT FCode, Status, RoundId FROM dbo.Invoices WITH (UPDLOCK, HOLDLOCK) WHERE InvoiceId=@id;", cn, tx))
+            {
+                q.Parameters.AddWithValue("@id", invoiceId);
+                using SqlDataReader r = await q.ExecuteReaderAsync(ct);
+                if (!await r.ReadAsync(ct))
+                {
+                    await r.CloseAsync();
+                    throw new ApiException(404, "invoice_not_found", "فاکتور پیدا نشد.");
+                }
+                fCode = r.GetInt64(0);
+                status = r.GetString(1);
+                roundId = r.IsDBNull(2) ? null : r.GetInt32(2);
+                await r.CloseAsync();
+            }
+
+            if (status != "NeedsReview")
+                throw new ApiException(409, "not_in_review", "فقط فاکتور در وضعیت NeedsReview قابل تأیید است.");
+
+            string newStatus;
+            int? targetRound = roundId;
+            int roundCount;
+            bool countChanged = false;
+            string message;
+
+            if (roundId.HasValue)
+            {
+                // در زمان علامت‌گذاری فاکتور تاریخی، شمارنده کم نشده بود؛ فقط وضعیت را برمی‌گردانیم.
+                using (SqlCommand upd = new(@"
+UPDATE dbo.Invoices SET Status='Valid', ReviewReason=NULL, ReviewEvidence=NULL WHERE InvoiceId=@id", cn, tx))
+                {
+                    upd.Parameters.AddWithValue("@id", invoiceId);
+                    await upd.ExecuteNonQueryAsync(ct);
+                }
+                RoundRow? rr = await ReadRoundAsync(cn, roundId.Value, tx, ct);
+                roundCount = rr?.Count ?? 0;
+                newStatus = "Valid";
+                message = "فاکتور تأیید شد؛ چون به دورهٔ تاریخی تعلق دارد، شمارش تغییر نکرد.";
+            }
+            else
+            {
+                RoundRow? open = await LockOpenRoundAsync(cn, tx, ct);
+                if (open != null && open.Count < open.Target)
+                {
+                    int newCount = open.Count + 1;
+                    bool full = newCount >= open.Target;
+                    using (SqlCommand upd = new(@"
+UPDATE dbo.Invoices SET Status='Valid', RoundId=@rid, ReviewReason=NULL, ReviewEvidence=NULL WHERE InvoiceId=@id", cn, tx))
+                    {
+                        upd.Parameters.AddWithValue("@rid", open.RoundId);
+                        upd.Parameters.AddWithValue("@id", invoiceId);
+                        await upd.ExecuteNonQueryAsync(ct);
+                    }
+                    using (SqlCommand upd = new(@"
+UPDATE dbo.Rounds SET [Count]=@c, Status=@st, CompletedAt=@done WHERE RoundId=@id", cn, tx))
+                    {
+                        upd.Parameters.AddWithValue("@c", newCount);
+                        upd.Parameters.AddWithValue("@st", full ? "Completed" : "Collecting");
+                        upd.Parameters.Add("@done", SqlDbType.DateTime2).Value = full ? DateTime.UtcNow : DBNull.Value;
+                        upd.Parameters.AddWithValue("@id", open.RoundId);
+                        await upd.ExecuteNonQueryAsync(ct);
+                    }
+                    if (full)
+                        await AuditAsync(cn, tx, "system", "round.completed", "Round", open.RoundId.ToString(),
+                            new { roundId = open.RoundId, count = newCount }, ct);
+
+                    targetRound = open.RoundId;
+                    roundCount = newCount;
+                    countChanged = true;
+                    newStatus = "Valid";
+                    message = "فاکتور تأیید شد و به دورهٔ جاری اضافه شد.";
+                }
+                else
+                {
+                    using (SqlCommand upd = new(@"
+UPDATE dbo.Invoices SET Status='Held', RoundId=NULL, ReviewReason=NULL, ReviewEvidence=NULL WHERE InvoiceId=@id", cn, tx))
+                    {
+                        upd.Parameters.AddWithValue("@id", invoiceId);
+                        await upd.ExecuteNonQueryAsync(ct);
+                    }
+                    roundCount = open?.Count ?? 0;
+                    newStatus = "Held";
+                    targetRound = null;
+                    message = "دورهٔ باز ظرفیت ندارد؛ فاکتور تأیید و در وضعیت Held نگه داشته شد.";
+                }
+            }
+
+            await AuditAsync(cn, tx, actor, "invoice.revalidate", "Invoice", invoiceId.ToString(),
+                new { invoiceId, fCode, status = newStatus, roundId = targetRound, countChanged }, ct);
+            await tx.CommitAsync(ct);
+            return new RevalidateResult
+            {
+                InvoiceId = invoiceId, FCode = fCode, Status = newStatus, RoundId = targetRound,
+                RoundCount = roundCount, CountChanged = countChanged, Message = message
+            };
+        }
+        catch (ApiException)
+        {
+            await tx.RollbackAsync(ct);
+            throw;
+        }
+        catch
+        {
+            try { await tx.RollbackAsync(ct); } catch { }
+            throw;
+        }
+    }
+
     public async Task<List<InvoiceRow>> GetInvoicesAsync(int? roundId, string? status, int limit, CancellationToken ct = default)
     {
         limit = Math.Clamp(limit, 1, 500);
@@ -604,7 +739,7 @@ UPDATE dbo.Rounds SET [Count] = CASE WHEN [Count] > 0 THEN [Count] - 1 ELSE 0 EN
         List<InvoiceRow> list = new();
         using SqlCommand cmd = new(@"
 SELECT TOP (@n) InvoiceId, FCode, FCodeC, FDate, Jalali, FTime, UserCode, Cashier, Gross, Points,
-       Status, RoundId, Mobile, VoidReason, ReceivedAt
+       Status, RoundId, Mobile, VoidReason, ReceivedAt, ReviewReason, ReviewEvidence
 FROM dbo.Invoices
 WHERE (@rid IS NULL OR RoundId = @rid) AND (@st IS NULL OR Status = @st)
 ORDER BY InvoiceId DESC;", cn);
@@ -630,7 +765,9 @@ ORDER BY InvoiceId DESC;", cn);
                 RoundId = r.IsDBNull(11) ? null : r.GetInt32(11),
                 Mobile = Security.MaskMobile(r.IsDBNull(12) ? null : r.GetString(12)),
                 VoidReason = r.IsDBNull(13) ? null : r.GetString(13),
-                ReceivedAt = r.GetDateTime(14)
+                ReceivedAt = r.GetDateTime(14),
+                ReviewReason = r.IsDBNull(15) ? null : r.GetString(15),
+                ReviewEvidence = r.IsDBNull(16) ? null : r.GetString(16)
             });
         }
         return list;
@@ -688,6 +825,19 @@ ORDER BY InvoiceId DESC;", cn);
     {
         string a = string.IsNullOrWhiteSpace(actor) ? "admin" : actor.Trim();
         return a.Length > 100 ? a[..100] : a;
+    }
+
+    private static string CleanReviewReason(string? raw)
+    {
+        string r = (raw ?? "").Trim().ToLowerInvariant();
+        if (r == "missing" || r == "voided" || r == "invalid" || r == "source") return r;
+        return "";
+    }
+
+    private static string Trim400(string? raw)
+    {
+        string t = (raw ?? "").Trim();
+        return t.Length > 400 ? t[..400] : t;
     }
 
     private static string? NullIfEmpty(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();

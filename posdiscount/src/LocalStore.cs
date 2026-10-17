@@ -31,6 +31,8 @@ namespace PosDiscount
         public int MobileEnteredBy;
         public string MobileEnteredAt = "";
         public string ServerStatus = "";        // وضعیت اعلام‌شده توسط سرور کمپین (اختیاری)
+        public string ReviewReason = "";        // missing | voided | invalid — فقط وقتی Status=review
+        public string ReviewEvidence = "";      // شواهد قابل بررسی (منبع، نوع، بازه، زمان)
     }
 
     /// <summary>یک ردیف صف همگام‌سازی (فاکتور + وضعیت ارسال).</summary>
@@ -46,6 +48,17 @@ namespace PosDiscount
         public int Pending;
         public int Failed;
         public string LastError = "";
+    }
+
+    /// <summary>یک ردیف سبک برای تطبیق تاریخی (بدون بارگذاری کل فاکتور).</summary>
+    public class ReconcileRow
+    {
+        public long FCode;
+        public string FDate = "";
+        public string Status = "";
+        public int MissingChecks;
+        public string ReviewReason = "";
+        public string ReviewEvidence = "";
     }
 
     /// <summary>خلاصه یک شماره موبایل (برای جست‌وجو و فهرست امتیازات).</summary>
@@ -169,7 +182,11 @@ CREATE TABLE IF NOT EXISTS Invoices(
     MobileEnteredBy INTEGER  NOT NULL DEFAULT 0,
     MobileEnteredAt TEXT     NOT NULL DEFAULT '',
     PopupShown      INTEGER  NOT NULL DEFAULT 0,
-    ServerStatus    TEXT     NOT NULL DEFAULT ''
+    ServerStatus    TEXT     NOT NULL DEFAULT '',
+    ReviewReason    TEXT     NOT NULL DEFAULT '',
+    ReviewEvidence  TEXT     NOT NULL DEFAULT '',
+    ReviewSince     TEXT     NOT NULL DEFAULT '',
+    MissingChecks   INTEGER  NOT NULL DEFAULT 0
 );");
             Exec("CREATE INDEX IF NOT EXISTS IX_Invoices_Mobile ON Invoices(Mobile);");
             Exec("CREATE INDEX IF NOT EXISTS IX_Invoices_FDate ON Invoices(FDate);");
@@ -244,8 +261,12 @@ CREATE TABLE IF NOT EXISTS SyncQueue(
             EnsureColumn("Invoices", "MobileEnteredAt", "TEXT NOT NULL DEFAULT ''");
             EnsureColumn("Invoices", "PopupShown", "INTEGER NOT NULL DEFAULT 0");
             EnsureColumn("Invoices", "ServerStatus", "TEXT NOT NULL DEFAULT ''");
+            EnsureColumn("Invoices", "ReviewReason", "TEXT NOT NULL DEFAULT ''");
+            EnsureColumn("Invoices", "ReviewEvidence", "TEXT NOT NULL DEFAULT ''");
+            EnsureColumn("Invoices", "ReviewSince", "TEXT NOT NULL DEFAULT ''");
+            EnsureColumn("Invoices", "MissingChecks", "INTEGER NOT NULL DEFAULT 0");
 
-            Exec("UPDATE Meta SET Value='4' WHERE Key='SchemaVersion' AND CAST(Value AS INTEGER) < 4;");
+            Exec("UPDATE Meta SET Value='5' WHERE Key='SchemaVersion' AND CAST(Value AS INTEGER) < 5;");
         }
 
         /// <summary>افزودن ستون در صورت نبودن (برای ارتقای دیتابیس‌های قبلی).</summary>
@@ -1320,6 +1341,158 @@ SELECT
             return list;
         }
 
+        /// <summary>فاکتورهای یک بازهٔ تاریخ میلادی، سبک و مخصوص تطبیق تاریخی.</summary>
+        public List<ReconcileRow> GetReconcileRows(string fromYmd, string toYmd)
+        {
+            List<ReconcileRow> list = new List<ReconcileRow>();
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return list;
+                    using (SQLiteCommand cmd = new SQLiteCommand(@"
+SELECT FCode, FDate, Status, MissingChecks, ReviewReason, ReviewEvidence
+FROM Invoices
+WHERE FDate >= @f AND FDate <= @t
+ORDER BY FDate, FCode", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@f", fromYmd == null ? "" : fromYmd.Trim());
+                        cmd.Parameters.AddWithValue("@t", toYmd == null ? "" : toYmd.Trim());
+                        using (SQLiteDataReader r = cmd.ExecuteReader())
+                        {
+                            while (r.Read())
+                            {
+                                ReconcileRow row = new ReconcileRow();
+                                row.FCode = L(r, 0);
+                                row.FDate = S(r, 1);
+                                row.Status = S(r, 2);
+                                row.MissingChecks = I(r, 3);
+                                row.ReviewReason = S(r, 4);
+                                row.ReviewEvidence = S(r, 5);
+                                list.Add(row);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex) { Fail("GetReconcileRows", ex); }
+            }
+            return list;
+        }
+
+        /// <summary>
+        /// علامت‌زدن فاکتور برای بررسی. اگر قبلاً با همین دلیل بررسی شده باشد false برمی‌گرداند
+        /// تا فراخوان، صف را دوباره پر نکند. دلیل تغییر کند (مثلاً missing → voided) true است.
+        /// </summary>
+        public bool SetReview(long fCode, string reason, string evidence)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return false;
+                    string oldStatus = "", oldReason = "";
+                    using (SQLiteCommand q = new SQLiteCommand(
+                        "SELECT Status, ReviewReason FROM Invoices WHERE FCode=@f", _cn))
+                    {
+                        q.Parameters.AddWithValue("@f", fCode);
+                        using (SQLiteDataReader r = q.ExecuteReader())
+                        {
+                            if (!r.Read()) return false;
+                            oldStatus = S(r, 0);
+                            oldReason = S(r, 1);
+                        }
+                    }
+
+                    string rr = reason == null ? "" : reason.Trim();
+                    if (string.Equals(oldStatus, "review", StringComparison.OrdinalIgnoreCase)
+                        && string.Equals(oldReason, rr, StringComparison.OrdinalIgnoreCase))
+                        return false;
+
+                    string now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+                    string ev = evidence == null ? "" : evidence.Trim();
+                    if (ev.Length > 400) ev = ev.Substring(0, 400);
+                    using (SQLiteCommand cmd = new SQLiteCommand(@"
+UPDATE Invoices
+SET Status='review', ReviewReason=@r, ReviewEvidence=@e, MissingChecks=0,
+    ReviewSince=CASE WHEN Status='review' AND ReviewSince<>'' THEN ReviewSince ELSE @now END
+WHERE FCode=@f", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@r", rr.Length > 20 ? rr.Substring(0, 20) : rr);
+                        cmd.Parameters.AddWithValue("@e", ev);
+                        cmd.Parameters.AddWithValue("@now", now);
+                        cmd.Parameters.AddWithValue("@f", fCode);
+                        cmd.ExecuteNonQuery();
+                    }
+                    return true;
+                }
+                catch (Exception ex) { Fail("SetReview", ex); return false; }
+            }
+        }
+
+        /// <summary>ثبت اولین/دومین مشاهدهٔ «غایب بودن» بدون تغییر وضعیت (تأیید دو مرحله‌ای).</summary>
+        public void SetMissingProbe(long fCode, int checks, string evidence)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return;
+                    string ev = evidence == null ? "" : evidence.Trim();
+                    if (ev.Length > 400) ev = ev.Substring(0, 400);
+                    using (SQLiteCommand cmd = new SQLiteCommand(@"
+UPDATE Invoices SET MissingChecks=@c, ReviewEvidence=@e WHERE FCode=@f", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@c", checks < 0 ? 0 : checks);
+                        cmd.Parameters.AddWithValue("@e", ev);
+                        cmd.Parameters.AddWithValue("@f", fCode);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+                catch (Exception ex) { Fail("SetMissingProbe", ex); }
+            }
+        }
+
+        /// <summary>پاک‌کردن شمارندهٔ غیبت وقتی منبع دوباره فاکتور را تأیید می‌کند.</summary>
+        public void ClearMissingProbe(long fCode)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return;
+                    using (SQLiteCommand cmd = new SQLiteCommand(@"
+UPDATE Invoices SET MissingChecks=0, ReviewEvidence='' WHERE FCode=@f AND MissingChecks<>0", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@f", fCode);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+                catch (Exception ex) { Fail("ClearMissingProbe", ex); }
+            }
+        }
+
+        /// <summary>به‌روزرسانی شواهد یک فاکتور در وضعیت بررسی (مثلاً وقتی منبع دوباره آن را تأیید کرد).</summary>
+        public void SetReviewEvidence(long fCode, string evidence)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return;
+                    string ev = evidence == null ? "" : evidence.Trim();
+                    if (ev.Length > 400) ev = ev.Substring(0, 400);
+                    using (SQLiteCommand cmd = new SQLiteCommand(
+                        "UPDATE Invoices SET ReviewEvidence=@e WHERE FCode=@f AND Status='review'", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@e", ev);
+                        cmd.Parameters.AddWithValue("@f", fCode);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+                catch (Exception ex) { Fail("SetReviewEvidence", ex); }
+            }
+        }
+
         /// <summary>علامت‌زدن فاکتور برای بررسی (مثلاً مشکوک به ابطال در تطبیق روزانه).</summary>
         public void SetInvoiceStatus(long fCode, string status)
         {
@@ -1344,7 +1517,7 @@ SELECT
         // ==================================================================
         private const string Cols = "FCode, FCodeC, FDate, Jalali, FTime, UserCode, Cashier, Gross, "
             + "HolooDiscount, Net, Mobile, CustomerCode, CustomerAlias, Points, OfferedDiscount, FirstSeen, UpdatedAt, "
-            + "Status, MobileEnteredBy, MobileEnteredAt, PopupShown, ServerStatus";
+            + "Status, MobileEnteredBy, MobileEnteredAt, PopupShown, ServerStatus, ReviewReason, ReviewEvidence";
 
         private static StoredInvoice ReadRow(SQLiteDataReader r)
         {
@@ -1370,6 +1543,8 @@ SELECT
             s.MobileEnteredBy = I(r, 18);
             s.MobileEnteredAt = S(r, 19);
             s.ServerStatus = S(r, 21);
+            s.ReviewReason = S(r, 22);
+            s.ReviewEvidence = S(r, 23);
             return s;
         }
 

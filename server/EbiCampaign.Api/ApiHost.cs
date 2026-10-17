@@ -123,6 +123,14 @@ public static class ApiHost
             return Results.Json(res, Json);
         });
 
+        app.MapPost("/api/v1/admin/invoices/{id:long}/revalidate", async (HttpContext ctx, long id, CampaignService svc) =>
+        {
+            RequireAdmin(ctx);
+            AdminActionRequest? req = await ReadOptionalJsonAsync<AdminActionRequest>(ctx);
+            RevalidateResult res = await svc.RevalidateInvoiceAsync(id, req?.Actor ?? ActorOf(ctx), ctx.RequestAborted);
+            return Results.Json(res, Json);
+        });
+
         app.MapGet("/api/v1/admin/invoices", async (HttpContext ctx, CampaignService svc) =>
         {
             RequireAdmin(ctx);

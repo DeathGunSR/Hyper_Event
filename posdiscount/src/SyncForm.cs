@@ -19,7 +19,8 @@ namespace PosDiscount
         private CheckBox _chkEnabled;
         private TextBox _txtUrl, _txtAgentId, _txtSecret, _txtStart;
         private NumericUpDown _numInterval, _numBatch;
-        private Label _lblQueue, _lblRound, _lblMsg;
+        private NumericUpDown _numReconcileDays, _numReconcileMinutes, _numReconcileConfirmations;
+        private Label _lblQueue, _lblRound, _lblReconcile, _lblMsg;
         private Button _btnSync, _btnSave, _btnClose;
 
         public SyncForm(AppSettings s, LocalStore store, Func<SyncRunResult> runNow)
@@ -34,8 +35,8 @@ namespace PosDiscount
         private void BuildUi()
         {
             Text = "همگام‌سازی کمپین — سرور مرکزی";
-            ClientSize = new Size(680, 540);
-            MinimumSize = new Size(680, 540);
+            ClientSize = new Size(680, 570);
+            MinimumSize = new Size(680, 570);
             StartPosition = FormStartPosition.CenterParent;
             RightToLeft = RightToLeft.Yes;
             RightToLeftLayout = true;
@@ -81,32 +82,45 @@ namespace PosDiscount
             Label l6 = Lbl("اندازهٔ دسته:", 340, 226, 150);
             _numBatch = Num(500, 226, 70, 1, 500, _s.SyncBatchSize);
 
+            Label l7 = Lbl("روزهای تطبیق تاریخی:", 12, 226, 170);
+            _numReconcileDays = Num(190, 226, 70, 1, 30, _s.ReconcileDays);
+
+            Label l8 = Lbl("فاصلهٔ تطبیق (دقیقه):", 12, 258, 170);
+            _numReconcileMinutes = Num(190, 258, 70, 5, 1440, _s.ReconcileIntervalMinutes);
+
+            Label l9 = Lbl("تأیید غیبت (تعداد):", 340, 258, 150);
+            _numReconcileConfirmations = Num(500, 258, 70, 1, 5, _s.ReconcileConfirmations);
+
             _lblQueue = new Label();
-            _lblQueue.SetBounds(12, 266, 656, 44);
+            _lblQueue.SetBounds(12, 296, 656, 44);
             _lblQueue.Font = new Font("Tahoma", 9.5F, FontStyle.Bold);
 
             _lblRound = new Label();
-            _lblRound.SetBounds(12, 312, 656, 44);
+            _lblRound.SetBounds(12, 342, 656, 44);
             _lblRound.ForeColor = Color.FromArgb(30, 62, 104);
 
+            _lblReconcile = new Label();
+            _lblReconcile.SetBounds(12, 388, 656, 44);
+            _lblReconcile.ForeColor = Color.FromArgb(30, 62, 104);
+
             _lblMsg = new Label();
-            _lblMsg.SetBounds(12, 358, 656, 90);
+            _lblMsg.SetBounds(12, 434, 656, 62);
             _lblMsg.ForeColor = Color.DimGray;
 
             _btnSave = new Button();
             _btnSave.Text = "ذخیره تنظیمات";
-            _btnSave.SetBounds(480, 470, 180, 34);
+            _btnSave.SetBounds(480, 510, 180, 34);
             _btnSave.Click += new EventHandler(delegate { Save_(); });
 
             _btnSync = new Button();
             _btnSync.Text = "همگام‌سازی فوری";
-            _btnSync.SetBounds(300, 470, 170, 34);
+            _btnSync.SetBounds(300, 510, 170, 34);
             _btnSync.Font = new Font("Tahoma", 9F, FontStyle.Bold);
             _btnSync.Click += new EventHandler(delegate { SyncNow(); });
 
             _btnClose = new Button();
             _btnClose.Text = "بستن";
-            _btnClose.SetBounds(12, 470, 170, 34);
+            _btnClose.SetBounds(12, 510, 170, 34);
             _btnClose.Click += new EventHandler(delegate { Close(); });
 
             Controls.Add(head);
@@ -117,8 +131,12 @@ namespace PosDiscount
             Controls.Add(l4); Controls.Add(_txtStart);
             Controls.Add(l5); Controls.Add(_numInterval);
             Controls.Add(l6); Controls.Add(_numBatch);
+            Controls.Add(l7); Controls.Add(_numReconcileDays);
+            Controls.Add(l8); Controls.Add(_numReconcileMinutes);
+            Controls.Add(l9); Controls.Add(_numReconcileConfirmations);
             Controls.Add(_lblQueue);
             Controls.Add(_lblRound);
+            Controls.Add(_lblReconcile);
             Controls.Add(_lblMsg);
             Controls.Add(_btnSave);
             Controls.Add(_btnSync);
@@ -189,6 +207,9 @@ namespace PosDiscount
             _s.CampaignStartDate = start.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
             _s.SyncIntervalSeconds = (int)_numInterval.Value;
             _s.SyncBatchSize = (int)_numBatch.Value;
+            _s.ReconcileDays = (int)_numReconcileDays.Value;
+            _s.ReconcileIntervalMinutes = (int)_numReconcileMinutes.Value;
+            _s.ReconcileConfirmations = (int)_numReconcileConfirmations.Value;
             try
             {
                 _s.Save();
@@ -251,6 +272,36 @@ namespace PosDiscount
             t.Start();
         }
 
+        private static string PrettyReconcile(string raw)
+        {
+            string at = "", from = "", to = "";
+            int checked_ = 0, marked = 0, missing = 0, voided = 0, invalid = 0, confirmed = 0, skipped = 0;
+            string[] parts = raw.Split(';');
+            for (int i = 0; i < parts.Length; i++)
+            {
+                int eq = parts[i].IndexOf('=');
+                if (eq <= 0) continue;
+                string k = parts[i].Substring(0, eq);
+                string v = parts[i].Substring(eq + 1);
+                if (k == "at") at = v;
+                else if (k == "from") from = v;
+                else if (k == "to") to = v;
+                else if (k == "checked") int.TryParse(v, out checked_);
+                else if (k == "marked") int.TryParse(v, out marked);
+                else if (k == "missing") int.TryParse(v, out missing);
+                else if (k == "voided") int.TryParse(v, out voided);
+                else if (k == "invalid") int.TryParse(v, out invalid);
+                else if (k == "confirmed") int.TryParse(v, out confirmed);
+                else if (k == "skippedDays") int.TryParse(v, out skipped);
+            }
+            return "آخرین تطبیق " + (at.Length == 0 ? "—" : at)
+                + " | بازه " + from + " تا " + to
+                + " | بررسی " + checked_ + " | جدید " + marked
+                + " | غایب " + missing + " | ابطال " + voided
+                + " | نامعتبر " + invalid + " | تأیید " + confirmed
+                + (skipped > 0 ? " | روز ناقص " + skipped : "");
+        }
+
         private void RefreshStatus()
         {
             if (_store == null)
@@ -262,6 +313,24 @@ namespace PosDiscount
             string watermark = _store.GetMetaValue("SyncLastFCode");
             _lblQueue.Text = "در صف ارسال: " + st.Pending + " | ناموفق/در انتظار تلاش: " + st.Failed
                 + " | آخرین FCode پردازش‌شده: " + (watermark.Length == 0 ? "—" : watermark);
+
+            string reconcile = _store.GetMetaValue("LastReconcileSummary");
+            string reconcileError = _store.GetMetaValue("LastReconcileError");
+            if (reconcileError.Length > 0)
+            {
+                _lblReconcile.ForeColor = Color.Firebrick;
+                _lblReconcile.Text = "تطبیق: " + reconcileError;
+            }
+            else if (reconcile.Length > 0)
+            {
+                _lblReconcile.ForeColor = Color.DarkSlateGray;
+                _lblReconcile.Text = PrettyReconcile(reconcile);
+            }
+            else
+            {
+                _lblReconcile.ForeColor = Color.DimGray;
+                _lblReconcile.Text = "تطبیق تاریخی هنوز اجرا نشده است.";
+            }
 
             string err = st.LastError;
             if (string.IsNullOrEmpty(err))
