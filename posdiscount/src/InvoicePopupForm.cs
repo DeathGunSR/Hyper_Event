@@ -16,6 +16,7 @@ namespace PosDiscount
         private readonly LocalStore _store;
         private readonly InvoiceInfo _inv;
         private readonly DiscountResult _res;
+        private readonly int _cashierCode;
         private StoredInvoice _rec;
 
         /// <summary>اطلاعات محلی (موبایل/امتیاز) در این پنجره تغییر کرده است.</summary>
@@ -29,12 +30,18 @@ namespace PosDiscount
         private int _left;
 
         public InvoicePopupForm(AppSettings s, LocalStore store, InvoiceInfo inv, DiscountResult res, StoredInvoice rec)
+            : this(s, store, inv, res, rec, 0)
+        {
+        }
+
+        public InvoicePopupForm(AppSettings s, LocalStore store, InvoiceInfo inv, DiscountResult res, StoredInvoice rec, int cashierCode)
         {
             _s = s;
             _store = store;
             _inv = inv;
             _res = res;
             _rec = rec;
+            _cashierCode = cashierCode;
 
             BuildUi();
             Shown += new EventHandler(OnShown);
@@ -342,7 +349,7 @@ namespace PosDiscount
                 return;
             }
 
-            StoredInvoice rec = _store.SetMobile(_inv.FCode, typed, _txtName.Text.Trim(), _s);
+            StoredInvoice rec = _store.SetMobile(_inv.FCode, typed, _txtName.Text.Trim(), _s, _cashierCode);
             if (rec == null)
             {
                 _lblSaved.ForeColor = Color.Firebrick;
@@ -398,7 +405,7 @@ namespace PosDiscount
 
             try
             {
-                StoredInvoice rec = _store.SetMobile(_inv.FCode, normalized, _txtName.Text.Trim(), _s);
+                StoredInvoice rec = _store.SetMobile(_inv.FCode, normalized, _txtName.Text.Trim(), _s, _cashierCode);
                 if (rec != null)
                 {
                     _rec = rec;

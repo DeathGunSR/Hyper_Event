@@ -22,7 +22,9 @@ namespace PosDiscount
         private CashierInfo _cashier;
 
         private Thread _poller;
+        private Thread _syncThread;
         private volatile bool _stop;
+        private volatile bool _syncStop;
         private long _lastFCode;
         private readonly object _sync = new object();
         private readonly Queue<PendingInv> _queue = new Queue<PendingInv>();
@@ -290,6 +292,7 @@ namespace PosDiscount
             menu.Items.Add("اصلاح خودکار اتصال", null, new EventHandler(delegate { HealFromUi(); }));
             menu.Items.Add("امتیاز مشتریان", null, new EventHandler(delegate { OpenPoints(); }));
             menu.Items.Add("قرعه‌کشی", null, new EventHandler(delegate { OpenLottery(); }));
+            menu.Items.Add("همگام‌سازی کمپین", null, new EventHandler(delegate { OpenSync(); }));
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("خروج", null, new EventHandler(delegate { _reallyExit = true; Close(); }));
             _tray.ContextMenuStrip = menu;
@@ -322,6 +325,7 @@ namespace PosDiscount
             UpdateSubTitle();
 
             StartPolling();
+            StartSyncLoop();
             if (_s.StartMinimizedToTray) HideToTray(false);
         }
 
@@ -406,6 +410,64 @@ namespace PosDiscount
         }
 
         // ==================================================================
+        //  همگام‌سازی با سرور مرکزی کمپین (بدون نوشتن در هلو)
+        // ==================================================================
+        private void StartSyncLoop()
+        {
+            if (!_s.SyncEnabled || _store == null) return;
+            _syncStop = false;
+            _syncThread = new Thread(new ThreadStart(SyncLoop));
+            _syncThread.IsBackground = true;
+            _syncThread.Name = "PosDiscountSync";
+            _syncThread.Start();
+        }
+
+        private void SyncLoop()
+        {
+            try { Thread.Sleep(2500); } catch (Exception) { }
+            while (!_syncStop)
+            {
+                try
+                {
+                    SyncRunResult r = new SyncAgent(_s, _db, _store).RunOnce();
+                    if (!r.Ok) CsvLog.Info(_s, "sync: " + r.Message);
+                }
+                catch (Exception ex)
+                {
+                    CsvLog.Error(_s, "sync loop: " + ex.ToString());
+                }
+
+                int seconds = _s.SyncIntervalSeconds;
+                if (seconds < 5) seconds = 5;
+                for (int i = 0; i < seconds * 2 && !_syncStop; i++)
+                {
+                    try { Thread.Sleep(500); } catch (Exception) { }
+                }
+            }
+        }
+
+        /// <summary>همگام‌سازی فوری (از فرم وضعیت یا تست). روی رشتهٔ فراخوان اجرا می‌شود.</summary>
+        private SyncRunResult RunSyncNow()
+        {
+            if (_store == null)
+            {
+                SyncRunResult bad = new SyncRunResult();
+                bad.Message = "دیتابیس محلی باز نیست.";
+                return bad;
+            }
+            return new SyncAgent(_s, _db, _store).RunOnce();
+        }
+
+        private void OpenSync()
+        {
+            using (SyncForm f = new SyncForm(_s, _store, RunSyncNow))
+                f.ShowDialog(this);
+
+            if (_s.SyncEnabled && (_syncThread == null || !_syncThread.IsAlive))
+                StartSyncLoop();
+        }
+
+        // ==================================================================
         //  فاکتور جدید
         // ==================================================================
         private void OnNewInvoices(List<InvoiceInfo> list)
@@ -430,9 +492,15 @@ namespace PosDiscount
                 CsvLog.Row(_s, _cashier.Name, inv, res, action,
                     rec == null ? "" : rec.Mobile, rec == null ? 0 : rec.Points);
 
-                // پاپ‌آپ فقط زمانی که فاکتور مشمول تخفیف باشد.
+                // پاپ‌آپ فقط زمانی که فاکتور مشمول تخفیف باشد و قبلاً نمایش داده نشده باشد.
                 if (res.HasDiscount)
                 {
+                    if (_localOk && _store != null)
+                    {
+                        if (_store.WasPopupShown(inv.FCode)) continue;
+                        _store.MarkPopupShown(inv.FCode);
+                    }
+
                     PendingInv p = new PendingInv();
                     p.Inv = inv;
                     p.Res = res;
@@ -472,7 +540,7 @@ namespace PosDiscount
 
             try
             {
-                using (InvoicePopupForm f = new InvoicePopupForm(_s, _store, p.Inv, p.Res, p.Rec))
+                using (InvoicePopupForm f = new InvoicePopupForm(_s, _store, p.Inv, p.Res, p.Rec, _cashier.Code))
                 {
                     f.ShowDialog(this);
                     if (f.DataChanged && p.Inv != null)
@@ -1042,7 +1110,10 @@ namespace PosDiscount
             }
 
             _stop = true;
+            _syncStop = true;
             _refresh.Stop();
+            Thread st = _syncThread;
+            if (st != null && st.IsAlive) { try { st.Join(2000); } catch (Exception) { } }
             if (_tray != null)
             {
                 _tray.Visible = false;

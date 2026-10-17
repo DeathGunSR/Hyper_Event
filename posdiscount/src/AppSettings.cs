@@ -3,6 +3,8 @@ using System.Collections.Generic;
 using System.Data.SqlClient;
 using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 using System.Xml;
 
 namespace PosDiscount
@@ -62,6 +64,16 @@ namespace PosDiscount
         public string StartTime = "00:00";          // بازه مجاز تخفیف (پیش‌فرض: تمام شبانه‌روز)
         public string EndTime = "23:59";
         public List<DiscountTier> Tiers = new List<DiscountTier>();
+
+        // ---------- همگام‌سازی با سرور مرکزی کمپین ----------
+        public bool SyncEnabled = false;
+        public string ApiBaseUrl = "http://127.0.0.1:5080";
+        public string ApiAgentId = "cashier-pc-1";
+        public string ApiAgentSecret = "";
+        public string CampaignStartDate = "2026-02-09";   // yyyy-MM-dd میلادی — باید با Campaign:StartDate سرور یکی باشد
+        public int SyncIntervalSeconds = 30;
+        public int SyncBatchSize = 100;
+        public int ApiTimeoutSeconds = 20;
 
         // ---------- نمایش ----------
         public int AutoCloseSeconds = 30;
@@ -200,6 +212,28 @@ namespace PosDiscount
                 }
             }
 
+            s.SyncEnabled = Num.ParseB(GetS(root, "SyncEnabled", "false"), s.SyncEnabled);
+            s.ApiBaseUrl = GetS(root, "ApiBaseUrl", s.ApiBaseUrl);
+            s.ApiAgentId = GetS(root, "ApiAgentId", s.ApiAgentId);
+            string protectedSecret = GetS(root, "ApiAgentSecretProtected", "");
+            if (protectedSecret.Length > 0)
+            {
+                try { s.ApiAgentSecret = UnprotectSecret(protectedSecret); }
+                catch (Exception) { s.ApiAgentSecret = GetS(root, "ApiAgentSecret", ""); }
+            }
+            else
+            {
+                s.ApiAgentSecret = GetS(root, "ApiAgentSecret", s.ApiAgentSecret);   // سازگاری با فایل قدیمی
+            }
+            s.CampaignStartDate = GetS(root, "CampaignStartDate", s.CampaignStartDate);
+            s.SyncIntervalSeconds = Num.ParseI(GetS(root, "SyncIntervalSeconds", "30"), s.SyncIntervalSeconds);
+            s.SyncBatchSize = Num.ParseI(GetS(root, "SyncBatchSize", "100"), s.SyncBatchSize);
+            s.ApiTimeoutSeconds = Num.ParseI(GetS(root, "ApiTimeoutSeconds", "20"), s.ApiTimeoutSeconds);
+            if (s.SyncIntervalSeconds < 5) s.SyncIntervalSeconds = 5;
+            if (s.SyncBatchSize < 1) s.SyncBatchSize = 1;
+            if (s.SyncBatchSize > 500) s.SyncBatchSize = 500;
+            if (s.ApiTimeoutSeconds < 5) s.ApiTimeoutSeconds = 5;
+
             s.AutoCloseSeconds = Num.ParseI(GetS(root, "AutoCloseSeconds", "30"), s.AutoCloseSeconds);
             s.PlaySound = Num.ParseB(GetS(root, "PlaySound", "true"), s.PlaySound);
             s.PopupCorner = GetS(root, "PopupCorner", s.PopupCorner).ToLowerInvariant();
@@ -211,6 +245,23 @@ namespace PosDiscount
             if (s.PointsPerAmountToman <= 0) s.PointsPerAmountToman = 500000;
             if (s.PointsBase != "net") s.PointsBase = "gross";
             return s;
+        }
+
+        /// <summary>رمزنگاری کلید عامل با DPAPI (کاربر جاری). فقط روی ویندوز.</summary>
+        public static string ProtectSecret(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            byte[] raw = Encoding.UTF8.GetBytes(value);
+            byte[] enc = ProtectedData.Protect(raw, null, DataProtectionScope.CurrentUser);
+            return Convert.ToBase64String(enc);
+        }
+
+        public static string UnprotectSecret(string value)
+        {
+            if (string.IsNullOrEmpty(value)) return "";
+            byte[] enc = Convert.FromBase64String(value);
+            byte[] raw = ProtectedData.Unprotect(enc, null, DataProtectionScope.CurrentUser);
+            return Encoding.UTF8.GetString(raw);
         }
 
         private static string GetS(XmlNode root, string name, string def)
@@ -276,6 +327,16 @@ namespace PosDiscount
                 tierRoot.AppendChild(e);
             }
 
+            Add(doc, root, "SyncEnabled", SyncEnabled ? "true" : "false");
+            Add(doc, root, "ApiBaseUrl", ApiBaseUrl);
+            Add(doc, root, "ApiAgentId", ApiAgentId);
+            // کلید عامل با DPAPI همین کاربر ویندوزی رمز می‌شود؛ متن ساده در فایل نوشته نمی‌شود.
+            Add(doc, root, "ApiAgentSecretProtected", ProtectSecret(ApiAgentSecret));
+            Add(doc, root, "CampaignStartDate", CampaignStartDate);
+            Add(doc, root, "SyncIntervalSeconds", SyncIntervalSeconds.ToString(CultureInfo.InvariantCulture));
+            Add(doc, root, "SyncBatchSize", SyncBatchSize.ToString(CultureInfo.InvariantCulture));
+            Add(doc, root, "ApiTimeoutSeconds", ApiTimeoutSeconds.ToString(CultureInfo.InvariantCulture));
+
             Add(doc, root, "AutoCloseSeconds", AutoCloseSeconds.ToString(CultureInfo.InvariantCulture));
             Add(doc, root, "PlaySound", PlaySound ? "true" : "false");
             Add(doc, root, "PopupCorner", PopupCorner);
@@ -298,6 +359,14 @@ namespace PosDiscount
         public AppSettings Clone()
         {
             AppSettings c = (AppSettings)MemberwiseClone();
+            c.SyncEnabled = SyncEnabled;
+            c.ApiBaseUrl = ApiBaseUrl;
+            c.ApiAgentId = ApiAgentId;
+            c.ApiAgentSecret = ApiAgentSecret;
+            c.CampaignStartDate = CampaignStartDate;
+            c.SyncIntervalSeconds = SyncIntervalSeconds;
+            c.SyncBatchSize = SyncBatchSize;
+            c.ApiTimeoutSeconds = ApiTimeoutSeconds;
             c.Tiers = new List<DiscountTier>();
             for (int i = 0; i < Tiers.Count; i++)
                 c.Tiers.Add(new DiscountTier(Tiers[i].MinAmount, Tiers[i].Percent, Tiers[i].Amount));

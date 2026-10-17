@@ -268,6 +268,87 @@ ORDER BY r.F_Code DESC";
             return ReadInvoices(sql, userCode, 0, max);
         }
 
+        /// <summary>همه فاکتورهای جدید (همهٔ صندوق‌دارها) از جدول روز + تاریخچه، برای عامل همگام‌سازی.</summary>
+        public List<InvoiceInfo> GetNewInvoicesAll(long afterFCode, DateTime minDate, int max)
+        {
+            if (max <= 0) max = 100;
+            const string filter = " WHERE r.F_Type <> 3 AND r.F_Code > @after AND r.F_Date >= @min ORDER BY r.F_Code ASC";
+            List<InvoiceInfo> live = ReadInvoices(InvoiceColumns + filter, 0, afterFCode, max, minDate);
+
+            const string archiveColumns = @"
+SELECT TOP (@max)
+       r.F_Code, r.F_Code_C, r.F_Type, r.F_Date, r.F_Time, r.UserCode,
+       u.Name AS CashierName,
+       r.F_SumPrice, r.F_Takhfif, r.F_Naghd, r.F_Pos, r.F_Nesieh, r.Bon_Price,
+       r.Pos_Code, r.C_Code, r.Alias_Name, r.F_Comment,
+       0 AS Items, 0 AS Few, 0 AS LineSum,
+       dbo.MiladiToShamsi(r.F_Date) AS JalaliDate,
+       ISNULL(r.Alias_Mobile,'') AS AliasMobile
+FROM dbo.Rs_Facture r
+LEFT JOIN dbo.USERDB u ON u.UserCodeInc = r.UserCode
+";
+            List<InvoiceInfo> archive = ReadInvoices(archiveColumns + filter, 0, afterFCode, max, minDate);
+
+            Dictionary<long, InvoiceInfo> map = new Dictionary<long, InvoiceInfo>();
+            for (int i = 0; i < archive.Count; i++) map[archive[i].FCode] = archive[i];
+            for (int i = 0; i < live.Count; i++) map[live[i].FCode] = live[i];   // نسخهٔ روز، دقیق‌تر است
+
+            List<InvoiceInfo> all = new List<InvoiceInfo>(map.Values);
+            all.Sort(delegate (InvoiceInfo a, InvoiceInfo b) { return a.FCode.CompareTo(b.FCode); });
+            if (all.Count > max) all = all.GetRange(0, max);
+            return all;
+        }
+
+        /// <summary>کد همهٔ فاکتورهای معتبر یک روز (جدول روز + تاریخچه) برای تطبیق.</summary>
+        public HashSet<long> GetInvoiceCodesForDay(DateTime day)
+        {
+            HashSet<long> set = new HashSet<long>();
+            using (SqlConnection c = Open())
+            using (SqlCommand cmd = new SqlCommand(@"
+SELECT F_Code FROM dbo.Res_Facture WHERE F_Type <> 3 AND F_Date = @d
+UNION
+SELECT F_Code FROM dbo.Rs_Facture WHERE F_Type <> 3 AND F_Date = @d", c))
+            {
+                cmd.Parameters.Add("@d", SqlDbType.SmallDateTime).Value = day.Date;
+                using (SqlDataReader dr = cmd.ExecuteReader())
+                    while (dr.Read()) set.Add(Convert.ToInt64(dr.GetValue(0)));
+            }
+            return set;
+        }
+
+        /// <summary>بزرگ‌ترین F_Code در جدول روز و تاریخچه.</summary>
+        public long GetMaxFCodeAll()
+        {
+            using (SqlConnection c = Open())
+            using (SqlCommand cmd = new SqlCommand(@"
+SELECT ISNULL(MAX(F_Code),0) FROM (
+    SELECT F_Code FROM dbo.Res_Facture
+    UNION ALL
+    SELECT F_Code FROM dbo.Rs_Facture
+) t", c))
+            {
+                object o = cmd.ExecuteScalar();
+                return (o == null || o == DBNull.Value) ? 0L : Convert.ToInt64(o);
+            }
+        }
+
+        /// <summary>کمترین F_Code از یک تاریخ به بعد (برای شروع وااترمارک بدون ورود فاکتورهای قدیمی).</summary>
+        public long GetMinFCodeSince(DateTime date)
+        {
+            using (SqlConnection c = Open())
+            using (SqlCommand cmd = new SqlCommand(@"
+SELECT ISNULL(MIN(F_Code),0) FROM (
+    SELECT F_Code FROM dbo.Res_Facture WHERE F_Type <> 3 AND F_Date >= @d
+    UNION ALL
+    SELECT F_Code FROM dbo.Rs_Facture WHERE F_Type <> 3 AND F_Date >= @d
+) t", c))
+            {
+                cmd.Parameters.Add("@d", SqlDbType.SmallDateTime).Value = date.Date;
+                object o = cmd.ExecuteScalar();
+                return (o == null || o == DBNull.Value) ? 0L : Convert.ToInt64(o);
+            }
+        }
+
         public InvoiceInfo GetInvoice(long fCode)
         {
             string sql = InvoiceColumns + @" WHERE r.F_Code = @after";
@@ -277,6 +358,11 @@ ORDER BY r.F_Code DESC";
 
         private List<InvoiceInfo> ReadInvoices(string sql, int userCode, long after, int max)
         {
+            return ReadInvoices(sql, userCode, after, max, null);
+        }
+
+        private List<InvoiceInfo> ReadInvoices(string sql, int userCode, long after, int max, DateTime? minDate)
+        {
             List<InvoiceInfo> list = new List<InvoiceInfo>();
             if (max <= 0) max = 1;
             using (SqlConnection c = Open())
@@ -285,6 +371,8 @@ ORDER BY r.F_Code DESC";
                 cmd.Parameters.Add("@max", SqlDbType.Int).Value = max;
                 if (sql.IndexOf("@user") >= 0) cmd.Parameters.Add("@user", SqlDbType.Int).Value = userCode;
                 if (sql.IndexOf("@after") >= 0) cmd.Parameters.Add("@after", SqlDbType.BigInt).Value = after;
+                if (minDate.HasValue && sql.IndexOf("@min") >= 0)
+                    cmd.Parameters.Add("@min", SqlDbType.SmallDateTime).Value = minDate.Value.Date;
                 using (SqlDataReader dr = cmd.ExecuteReader())
                 {
                     while (dr.Read())

@@ -18,16 +18,16 @@ if not exist bin\logs mkdir bin\logs
 if not exist bin\x64 mkdir bin\x64
 if not exist bin\x86 mkdir bin\x86
 
-set REFS=-r:System.dll -r:System.Core.dll -r:System.Data.dll -r:System.Drawing.dll -r:System.Windows.Forms.dll -r:System.Xml.dll -r:lib\System.Data.SQLite.dll
+set REFS=-r:System.dll -r:System.Core.dll -r:System.Data.dll -r:System.Drawing.dll -r:System.Windows.Forms.dll -r:System.Xml.dll -r:System.Security.dll -r:System.Web.Extensions.dll -r:lib\System.Data.SQLite.dll
 
-set SRC=src\AppSettings.cs src\CashierSelectForm.cs src\ConnectionFixer.cs src\CsvLog.cs src\CustomerInvoicesForm.cs src\DashboardForm.cs src\DiscountEngine.cs src\HolooDb.cs src\InvoicePopupForm.cs src\LocalStore.cs src\Lottery.cs src\LotteryForm.cs src\Loyalty.cs src\MobileEntryForm.cs src\PointsForm.cs src\Program.cs src\SettingsForm.cs src\Util.cs
+set SRC=src\ApiClient.cs src\AppSettings.cs src\CashierSelectForm.cs src\ConnectionFixer.cs src\CsvLog.cs src\CustomerInvoicesForm.cs src\DashboardForm.cs src\DiscountEngine.cs src\HolooDb.cs src\InvoicePopupForm.cs src\LocalStore.cs src\Lottery.cs src\LotteryForm.cs src\Loyalty.cs src\MobileEntryForm.cs src\PointsForm.cs src\Program.cs src\SettingsForm.cs src\SyncAgent.cs src\SyncForm.cs src\Util.cs
 
 echo 1/3  PosDiscount.exe ...
 "%CSC%" -nologo -codepage:65001 -langversion:5 -target:winexe -optimize+ -win32manifest:src\app.manifest -main:PosDiscount.Program -out:bin\PosDiscount.exe %REFS% %SRC%
 if errorlevel 1 goto fail
 
 echo 2/3  SelfTest.exe ...
-"%CSC%" -nologo -codepage:65001 -langversion:5 -target:exe -optimize+ -main:PosDiscount.SelfTest -out:bin\SelfTest.exe %REFS% %SRC% src\SelfTest.cs
+"%CSC%" -nologo -codepage:65001 -langversion:5 -target:exe -optimize+ -main:PosDiscount.SelfTest -out:bin\SelfTest.exe %REFS% %SRC% src\SelfTest.cs src\Phase1Tests.cs
 if errorlevel 1 goto fail
 
 echo 3/3  کپی کتابخانه دیتابیس محلی (SQLite) کنار فایل اجرایی ...

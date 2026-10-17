@@ -1,0 +1,27 @@
+== 1. source overview ==
+day|160|160|159|1|590510|590669|2026-02-09|2026-02-09
+archive_since_start|0|0|NULL|NULL|NULL|NULL|NULL|NULL
+== 2. duplicate F_Code across live + archive (campaign window) ==
+0
+== 3. F_Code_C duplicates (campaign window) ==
+0
+== 4. per-cashier valid invoices since start ==
+9|145|590510|590669|2026-02-09|2026-02-09
+1|13|590567|590657|2026-02-09|2026-02-09
+5|1|590665|590665|2026-02-09|2026-02-09
+== 5. type distribution since start ==
+2|159
+3|1
+== 6. code/number mapping sample (latest 8 valid) ==
+590669|21168|2|2026-02-09|15:30|9
+590668|21167|2|2026-02-09|15:29|9
+590667|21166|2|2026-02-09|15:28|9
+590666|21165|2|2026-02-09|15:28|9
+590665|21164|2|2026-02-09|15:25|5
+590664|21163|2|2026-02-09|15:23|9
+590663|21162|2|2026-02-09|15:17|9
+590662|21161|2|2026-02-09|15:15|9
+== 7. watermark safety ==
+590510|590669|0
+== 8. identities / mobile presence on invoices ==
+0|159

@@ -1,0 +1,6 @@
+POS ApiClient -> real EbiCampaign API (HMAC + JSON + idempotency + review)
+first: accepted=1 dup=0 round=1 count=2 status=Valid
+second: accepted=0 dup=1 count=2
+review: accepted=0 review=1 result=NeedsReview count=1
+snapshot: round=1 count=1 target=1000 status=Collecting
+E2E OK

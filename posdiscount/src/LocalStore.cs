@@ -27,6 +27,25 @@ namespace PosDiscount
         public double OfferedDiscount;
         public string FirstSeen = "";
         public string UpdatedAt = "";
+        public string Status = "valid";        // valid | review (مشکوک به ابطال) — تصمیم نهایی با سرور
+        public int MobileEnteredBy;
+        public string MobileEnteredAt = "";
+        public string ServerStatus = "";        // وضعیت اعلام‌شده توسط سرور کمپین (اختیاری)
+    }
+
+    /// <summary>یک ردیف صف همگام‌سازی (فاکتور + وضعیت ارسال).</summary>
+    public class SyncItem
+    {
+        public StoredInvoice Invoice;
+        public int Attempts;
+        public string LastError = "";
+    }
+
+    public class SyncStats
+    {
+        public int Pending;
+        public int Failed;
+        public string LastError = "";
     }
 
     /// <summary>خلاصه یک شماره موبایل (برای جست‌وجو و فهرست امتیازات).</summary>
@@ -145,8 +164,12 @@ CREATE TABLE IF NOT EXISTS Invoices(
     CustomerAlias   TEXT    NOT NULL DEFAULT '',
     Points          INTEGER NOT NULL DEFAULT 0,
     OfferedDiscount REAL    NOT NULL DEFAULT 0,
-    FirstSeen       TEXT    NOT NULL DEFAULT '',
-    UpdatedAt       TEXT    NOT NULL DEFAULT ''
+    FirstSeen       TEXT    NOT NULL DEFAULT '',    UpdatedAt       TEXT     NOT NULL DEFAULT '',
+    Status          TEXT     NOT NULL DEFAULT 'valid',
+    MobileEnteredBy INTEGER  NOT NULL DEFAULT 0,
+    MobileEnteredAt TEXT     NOT NULL DEFAULT '',
+    PopupShown      INTEGER  NOT NULL DEFAULT 0,
+    ServerStatus    TEXT     NOT NULL DEFAULT ''
 );");
             Exec("CREATE INDEX IF NOT EXISTS IX_Invoices_Mobile ON Invoices(Mobile);");
             Exec("CREATE INDEX IF NOT EXISTS IX_Invoices_FDate ON Invoices(FDate);");
@@ -198,14 +221,31 @@ CREATE TABLE IF NOT EXISTS DrawWinners(
     PRIMARY KEY(DrawId, Rank)
 );");
 
+            // صف همگام‌سازی با سرور مرکزی کمپین (فاکتورهای ارسال‌نشده/ناموفق)
+            Exec(@"
+CREATE TABLE IF NOT EXISTS SyncQueue(
+    FCode     INTEGER PRIMARY KEY,
+    Status    TEXT    NOT NULL DEFAULT 'pending',
+    Attempts  INTEGER NOT NULL DEFAULT 0,
+    NextTryAt TEXT    NOT NULL DEFAULT '',
+    LastError TEXT    NOT NULL DEFAULT '',
+    CreatedAt TEXT    NOT NULL DEFAULT '',
+    SentAt    TEXT    NOT NULL DEFAULT ''
+);");
+
             Exec("INSERT OR IGNORE INTO Meta(Key, Value) VALUES('SchemaVersion', '1');");
 
             // مهاجرت نرم: ستون‌های جدید به دیتابیس‌های قبلی اضافه می‌شوند (بدون از دست رفتن داده)
             EnsureColumn("DrawWinners", "Prize", "TEXT NOT NULL DEFAULT ''");
             EnsureColumn("Draws", "Prizes", "TEXT NOT NULL DEFAULT ''");
             EnsureColumn("Draws", "Scope", "TEXT NOT NULL DEFAULT ''");
+            EnsureColumn("Invoices", "Status", "TEXT NOT NULL DEFAULT 'valid'");
+            EnsureColumn("Invoices", "MobileEnteredBy", "INTEGER NOT NULL DEFAULT 0");
+            EnsureColumn("Invoices", "MobileEnteredAt", "TEXT NOT NULL DEFAULT ''");
+            EnsureColumn("Invoices", "PopupShown", "INTEGER NOT NULL DEFAULT 0");
+            EnsureColumn("Invoices", "ServerStatus", "TEXT NOT NULL DEFAULT ''");
 
-            Exec("UPDATE Meta SET Value='3' WHERE Key='SchemaVersion' AND CAST(Value AS INTEGER) < 3;");
+            Exec("UPDATE Meta SET Value='4' WHERE Key='SchemaVersion' AND CAST(Value AS INTEGER) < 4;");
         }
 
         /// <summary>افزودن ستون در صورت نبودن (برای ارتقای دیتابیس‌های قبلی).</summary>
@@ -310,6 +350,12 @@ WHERE FCode=@f", _cn))
                     }
 
                     if (mobile.Length > 0) TouchMobile(mobile, alias, now);
+
+                    // فقط وقتی دادهٔ مؤثر عوض شده، برای ارسال به سرور کمپین در صف می‌نشیند
+                    if (old == null || !string.Equals(mobile, old.Mobile, StringComparison.Ordinal)
+                        || points != old.Points || Math.Abs(old.Gross - inv.Gross) > 0.5)
+                        EnqueueSync(inv.FCode);
+
                     return Read(inv.FCode);
                 }
                 catch (Exception ex)
@@ -322,6 +368,12 @@ WHERE FCode=@f", _cn))
 
         /// <summary>ثبت/تغییر شماره موبایل یک فاکتور و به‌روزرسانی امتیاز آن.</summary>
         public StoredInvoice SetMobile(long fCode, string mobileRaw, string name, AppSettings s)
+        {
+            return SetMobile(fCode, mobileRaw, name, s, 0);
+        }
+
+        /// <summary>ثبت موبایل همراه با هویت صندوق‌دار (برای حسابرسی «چه کسی شماره را وارد کرد»).</summary>
+        public StoredInvoice SetMobile(long fCode, string mobileRaw, string name, AppSettings s, int enteredBy)
         {
             lock (_gate)
             {
@@ -340,15 +392,18 @@ WHERE FCode=@f", _cn))
 
                     string now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
                     using (SQLiteCommand cmd = new SQLiteCommand(
-                        "UPDATE Invoices SET Mobile=@m, Points=@p, UpdatedAt=@now WHERE FCode=@f", _cn))
+                        "UPDATE Invoices SET Mobile=@m, Points=@p, UpdatedAt=@now, "
+                        + "MobileEnteredBy=@by, MobileEnteredAt=@now WHERE FCode=@f", _cn))
                     {
                         cmd.Parameters.AddWithValue("@m", mobile);
                         cmd.Parameters.AddWithValue("@p", points);
                         cmd.Parameters.AddWithValue("@now", now);
+                        cmd.Parameters.AddWithValue("@by", enteredBy);
                         cmd.Parameters.AddWithValue("@f", fCode);
                         cmd.ExecuteNonQuery();
                     }
                     if (mobile.Length > 0) TouchMobile(mobile, name, now);
+                    EnqueueSync(fCode);
                     return Read(fCode);
                 }
                 catch (Exception ex)
@@ -991,10 +1046,305 @@ VALUES(@id, @rank, @m, @n, @p, @c, @a, @ci, @cp, @pr)", _cn))
         }
 
         // ==================================================================
+        //  صف همگام‌سازی با سرور مرکزی کمپین
+        // ==================================================================
+        /// <summary>افزودن/بازنشاندن یک فاکتور در صف ارسال (تکرارپذیر).</summary>
+        public void EnqueueSync(long fCode)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return;
+                    string now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+                    using (SQLiteCommand ins = new SQLiteCommand(@"
+INSERT OR IGNORE INTO SyncQueue(FCode, Status, Attempts, NextTryAt, LastError, CreatedAt, SentAt)
+VALUES(@f, 'pending', 0, '', '', @now, '')", _cn))
+                    {
+                        ins.Parameters.AddWithValue("@f", fCode);
+                        ins.Parameters.AddWithValue("@now", now);
+                        ins.ExecuteNonQuery();
+                    }
+                    using (SQLiteCommand upd = new SQLiteCommand(@"
+UPDATE SyncQueue SET Status='pending', Attempts=0, NextTryAt='', LastError='', CreatedAt=@now
+WHERE FCode=@f", _cn))
+                    {
+                        upd.Parameters.AddWithValue("@f", fCode);
+                        upd.Parameters.AddWithValue("@now", now);
+                        upd.ExecuteNonQuery();
+                    }
+                }
+                catch (Exception ex) { Fail("EnqueueSync", ex); }
+            }
+        }
+
+        /// <summary>فاکتورهای آمادهٔ ارسال (زمان تلاش بعدی رسیده باشد).</summary>
+        public List<SyncItem> GetPendingSync(int max)
+        {
+            List<SyncItem> list = new List<SyncItem>();
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return list;
+                    if (max <= 0) max = 50;
+                    string now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+                    List<long> codes = new List<long>();
+                    List<int> attempts = new List<int>();
+                    List<string> errors = new List<string>();
+                    using (SQLiteCommand cmd = new SQLiteCommand(@"
+SELECT FCode, Attempts, LastError FROM SyncQueue
+WHERE Status='pending' AND (NextTryAt='' OR NextTryAt <= @now)
+ORDER BY FCode LIMIT @n", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@now", now);
+                        cmd.Parameters.AddWithValue("@n", max);
+                        using (SQLiteDataReader r = cmd.ExecuteReader())
+                        {
+                            while (r.Read())
+                            {
+                                codes.Add(L(r, 0));
+                                attempts.Add(I(r, 1));
+                                errors.Add(S(r, 2));
+                            }
+                        }
+                    }
+
+                    for (int i = 0; i < codes.Count; i++)
+                    {
+                        StoredInvoice inv = Read(codes[i]);
+                        if (inv == null) continue;
+                        SyncItem it = new SyncItem();
+                        it.Invoice = inv;
+                        it.Attempts = attempts[i];
+                        it.LastError = errors[i];
+                        list.Add(it);
+                    }
+                }
+                catch (Exception ex) { Fail("GetPendingSync", ex); }
+            }
+            return list;
+        }
+
+        public void MarkSyncSent(long fCode, string serverStatus)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return;
+                    string now = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+                    using (SQLiteCommand cmd = new SQLiteCommand(@"
+UPDATE SyncQueue SET Status='sent', SentAt=@now, LastError='', NextTryAt='' WHERE FCode=@f", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@now", now);
+                        cmd.Parameters.AddWithValue("@f", fCode);
+                        cmd.ExecuteNonQuery();
+                    }
+                    using (SQLiteCommand cmd = new SQLiteCommand(
+                        "UPDATE Invoices SET ServerStatus=@st WHERE FCode=@f", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@st", serverStatus == null ? "" : serverStatus);
+                        cmd.Parameters.AddWithValue("@f", fCode);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+                catch (Exception ex) { Fail("MarkSyncSent", ex); }
+            }
+        }
+
+        public void MarkSyncFailed(long fCode, string error, int retrySeconds)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return;
+                    if (retrySeconds < 5) retrySeconds = 5;
+                    DateTime next = DateTime.Now.AddSeconds(retrySeconds);
+                    string nextText = next.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
+                    string msg = error == null ? "" : error.Trim();
+                    if (msg.Length > 400) msg = msg.Substring(0, 400);
+                    using (SQLiteCommand cmd = new SQLiteCommand(@"
+UPDATE SyncQueue SET Attempts=Attempts+1, NextTryAt=@next, LastError=@err WHERE FCode=@f", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@next", nextText);
+                        cmd.Parameters.AddWithValue("@err", msg);
+                        cmd.Parameters.AddWithValue("@f", fCode);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+                catch (Exception ex) { Fail("MarkSyncFailed", ex); }
+            }
+        }
+
+        /// <summary>آیا این فاکتور در صف ارسال (وضعیت pending) قرار دارد؟</summary>
+        public bool IsQueued(long fCode)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return false;
+                    using (SQLiteCommand cmd = new SQLiteCommand(
+                        "SELECT COUNT(*) FROM SyncQueue WHERE FCode=@f AND Status='pending'", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@f", fCode);
+                        return Convert.ToInt32(cmd.ExecuteScalar(), CultureInfo.InvariantCulture) > 0;
+                    }
+                }
+                catch (Exception ex) { Fail("IsQueued", ex); return false; }
+            }
+        }
+
+        public SyncStats GetSyncStats()
+        {
+            SyncStats st = new SyncStats();
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return st;
+                    using (SQLiteCommand cmd = new SQLiteCommand(@"
+SELECT
+  (SELECT COUNT(*) FROM SyncQueue WHERE Status='pending'),
+  (SELECT COUNT(*) FROM SyncQueue WHERE Status='pending' AND LastError<>''),
+  (SELECT IFNULL(LastError,'') FROM SyncQueue WHERE LastError<>'' ORDER BY FCode DESC LIMIT 1)", _cn))
+                    using (SQLiteDataReader r = cmd.ExecuteReader())
+                    {
+                        if (r.Read())
+                        {
+                            st.Pending = I(r, 0);
+                            st.Failed = I(r, 1);
+                            st.LastError = S(r, 2);
+                        }
+                    }
+                }
+                catch (Exception ex) { Fail("GetSyncStats", ex); }
+            }
+            return st;
+        }
+
+        public string GetMetaValue(string key)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return "";
+                    using (SQLiteCommand cmd = new SQLiteCommand("SELECT IFNULL(Value,'') FROM Meta WHERE Key=@k", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@k", key);
+                        object o = cmd.ExecuteScalar();
+                        return o == null || o == DBNull.Value ? "" : Convert.ToString(o, CultureInfo.InvariantCulture);
+                    }
+                }
+                catch (Exception ex) { Fail("GetMetaValue", ex); return ""; }
+            }
+        }
+
+        public void SetMetaValue(string key, string value)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return;
+                    using (SQLiteCommand cmd = new SQLiteCommand(
+                        "INSERT OR REPLACE INTO Meta(Key, Value) VALUES(@k, @v)", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@k", key);
+                        cmd.Parameters.AddWithValue("@v", value == null ? "" : value);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+                catch (Exception ex) { Fail("SetMetaValue", ex); }
+            }
+        }
+
+        /// <summary>آیا پاپ‌آپ این فاکتور قبلاً نمایش داده شده است (برای جلوگیری از تکرار پس از ری‌استارت).</summary>
+        public bool WasPopupShown(long fCode)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return false;
+                    using (SQLiteCommand cmd = new SQLiteCommand("SELECT PopupShown FROM Invoices WHERE FCode=@f", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@f", fCode);
+                        object o = cmd.ExecuteScalar();
+                        return o != null && o != DBNull.Value && Convert.ToInt32(o, CultureInfo.InvariantCulture) != 0;
+                    }
+                }
+                catch (Exception ex) { Fail("WasPopupShown", ex); return false; }
+            }
+        }
+
+        public void MarkPopupShown(long fCode)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return;
+                    using (SQLiteCommand cmd = new SQLiteCommand("UPDATE Invoices SET PopupShown=1 WHERE FCode=@f", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@f", fCode);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+                catch (Exception ex) { Fail("MarkPopupShown", ex); }
+            }
+        }
+
+        /// <summary>فاکتورهای یک روز میلادی (yyyy-MM-dd) — برای تطبیق با منبع.</summary>
+        public List<StoredInvoice> GetInvoicesOnDay(string ymd)
+        {
+            List<StoredInvoice> list = new List<StoredInvoice>();
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return list;
+                    using (SQLiteCommand cmd = new SQLiteCommand(
+                        "SELECT " + Cols + " FROM Invoices WHERE FDate=@d ORDER BY FCode", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@d", ymd == null ? "" : ymd.Trim());
+                        using (SQLiteDataReader r = cmd.ExecuteReader())
+                            while (r.Read()) list.Add(ReadRow(r));
+                    }
+                }
+                catch (Exception ex) { Fail("GetInvoicesOnDay", ex); }
+            }
+            return list;
+        }
+
+        /// <summary>علامت‌زدن فاکتور برای بررسی (مثلاً مشکوک به ابطال در تطبیق روزانه).</summary>
+        public void SetInvoiceStatus(long fCode, string status)
+        {
+            lock (_gate)
+            {
+                try
+                {
+                    if (!EnsureOpen()) return;
+                    using (SQLiteCommand cmd = new SQLiteCommand("UPDATE Invoices SET Status=@s WHERE FCode=@f", _cn))
+                    {
+                        cmd.Parameters.AddWithValue("@s", status == null ? "valid" : status);
+                        cmd.Parameters.AddWithValue("@f", fCode);
+                        cmd.ExecuteNonQuery();
+                    }
+                }
+                catch (Exception ex) { Fail("SetInvoiceStatus", ex); }
+            }
+        }
+
+        // ==================================================================
         //  کمکی‌های داخلی
         // ==================================================================
         private const string Cols = "FCode, FCodeC, FDate, Jalali, FTime, UserCode, Cashier, Gross, "
-            + "HolooDiscount, Net, Mobile, CustomerCode, CustomerAlias, Points, OfferedDiscount, FirstSeen, UpdatedAt";
+            + "HolooDiscount, Net, Mobile, CustomerCode, CustomerAlias, Points, OfferedDiscount, FirstSeen, UpdatedAt, "
+            + "Status, MobileEnteredBy, MobileEnteredAt, PopupShown, ServerStatus";
 
         private static StoredInvoice ReadRow(SQLiteDataReader r)
         {
@@ -1016,6 +1366,10 @@ VALUES(@id, @rank, @m, @n, @p, @c, @a, @ci, @cp, @pr)", _cn))
             s.OfferedDiscount = D(r, 14);
             s.FirstSeen = S(r, 15);
             s.UpdatedAt = S(r, 16);
+            s.Status = S(r, 17);
+            s.MobileEnteredBy = I(r, 18);
+            s.MobileEnteredAt = S(r, 19);
+            s.ServerStatus = S(r, 21);
             return s;
         }
 

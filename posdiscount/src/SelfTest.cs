@@ -26,7 +26,7 @@ namespace PosDiscount
     ///   --draw N : قرعه‌کشی نمونه روی دیتابیس محلی واقعی (فقط نمایش، بدون ذخیره)
     /// خروجی متنی UTF-8 در bin\logs\selftest.txt نوشته می‌شود.
     /// </summary>
-    internal static class SelfTest
+    internal static partial class SelfTest
     {
         private static int _fails;
 
@@ -579,6 +579,8 @@ namespace PosDiscount
             {
                 log.AppendLine("  خطا در تست لاگ: " + ex.Message);
             }
+
+            Phase1AgentTests(s, log);
 
             if (uiShot)
             {
