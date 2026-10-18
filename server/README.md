@@ -228,7 +228,7 @@ SMS در سرویس مرکزی وجود ندارد؛ ارسال دستی پیا�
 
 ```bash
 # از ریشهٔ server
-dotnet run --project EbiCampaign.Tests                 # ۳۰۲ بررسی (فاز ۱، ۲ و ۳)
+dotnet run --project EbiCampaign.Tests                 # ۳۱۱ بررسی (فاز ۱، ۲، ۳ و انتهابه‌انتها)
 dotnet run --project EbiCampaign.BaleBot.Tests         # ۳۰ بررسی ربات با Mock
 EBI_LOAD=800x32 dotnet run --project EbiCampaign.Tests # آزمون بار: ۸۰۰ ارسال با همزمانی ۳۲
 ```

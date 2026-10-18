@@ -201,6 +201,10 @@ internal static class Program
             await RunAsync("۵۶. وضعیت عضویت: عضو، غیرعضو و نامعلوم از هم جدا می‌شوند", BaleStatusAsync);
             await RunAsync("۵۷. پنل بله فقط با مجوز حریم خصوصی و با شمارهٔ سانسورشده", BaleAdminAsync);
             await RunAsync("۵۸. تفسیر پاسخ getChatMember و مدیریت خطا", BaleBotApiParsingAsync);
+
+            Console.WriteLine();
+            Console.WriteLine("=== Phase 3 — سناریوی انتهابه‌انتها (بند ۱۲) ===");
+            await RunAsync("۵۹. از ثبت فاکتور تا نمایش عمومی نتیجهٔ قابل راستی‌آزمایی", EndToEndAsync);
         }
         catch (Exception ex)
         {
@@ -350,6 +354,61 @@ internal static class Program
 
         HttpResponseMessage denied = await AdminPostKeyAsync("/api/v1/admin/bale/check", RolePublish, new { mobile = "09127770001" });
         Check("کلید انتشار نتیجه اجازهٔ بررسی ندارد", denied.StatusCode == HttpStatusCode.Unauthorized, "");
+    }
+
+    /// <summary>
+    /// سناریوی کامل: شروع دوره، ثبت ۱۰۰۰ فاکتور از مسیر واقعی عامل، تکمیل دوره،
+    /// تثبیت مجموعه، انتخاب، نهایی‌سازی، انتشار و خواندن نتیجه از مسیرهای عمومی.
+    /// </summary>
+    private static async Task EndToEndAsync()
+    {
+        RoundInfo round = await StartFreshRoundAsync();
+        int accepted = 0;
+        for (int batch = 0; batch < 2; batch++)
+        {
+            IngestInvoice[] invoices = Enumerable.Range(0, 500)
+                .Select(i => Invoice(900000 + (batch * 500) + i, userCode: 9, cashier: "صندوق ۱", mobile: SeedMobile))
+                .ToArray();
+            IngestResponse r = await IngestAsync(AgentA, AgentASecret, NewRequest("e2e-" + batch, invoices));
+            accepted += r.Accepted;
+        }
+        Check("ثبت ۱۰۰۰ فاکتور از مسیر واقعی عامل", accepted == 1000, accepted.ToString());
+
+        RoundInfo completed = await CurrentRoundAsync();
+        Check("دوره پس از ۱۰۰۰ فاکتور خودکار تکمیل شد",
+            completed.Status == "Completed" && completed.Count == 1000, $"{completed.Status}/{completed.Count}");
+        Check("فاکتور ۱۰۰۰ در دورهٔ در انتظار قرعه‌کشی می‌ماند (دورهٔ بعد باز نشده)",
+            (await CountAsync("SELECT COUNT(*) FROM dbo.Rounds")) == 1, "");
+
+        _baleReady = true;
+        BaleMembers.Add(SeedMobile);
+        int runId = await FinalizeRunAsync(round.RoundId);
+        await PublishAsync(runId, "برندهٔ آزمون");
+
+        PublicCampaignStatus status = await ReadPublicAsync<PublicCampaignStatus>(
+            await PublicGetAsync("/api/v1/public/campaign/current"));
+        Check("نتیجهٔ رسمی در صفحهٔ کمپین منتشر شد",
+            status.State == "ResultPublished" && status.LastResult?.RoundNo == round.RoundNo,
+            $"{status.State}/{status.LastResult?.RoundNo}");
+        Check("شمارهٔ برنده در خروجی عمومی سانسور شده است",
+            status.LastResult!.MobileMasked.Contains("***", StringComparison.Ordinal)
+            && !status.LastResult.MobileMasked.Contains(SeedMobile, StringComparison.Ordinal),
+            status.LastResult.MobileMasked);
+
+        PublicWinnersPage winners = await ReadPublicAsync<PublicWinnersPage>(
+            await PublicGetAsync("/api/v1/public/winners?page=1&perPage=10"));
+        Check("آرشیو برندگان همان دوره را نشان می‌دهد",
+            winners.Total == 1 && winners.Winners[0].RoundNo == round.RoundNo, winners.Total.ToString());
+
+        PublicVerifyResult verify = await ReadPublicAsync<PublicVerifyResult>(
+            await PublicGetAsync($"/api/v1/public/lottery/{runId}/verify"));
+        Check("سند عمومی برنده، تعهد و هش را بازتولید می‌کند",
+            verify.WinnerReproduces && verify.CommitmentMatches && verify.PublicEntriesHashMatches,
+            $"winner={verify.WinnerReproduces} commitment={verify.CommitmentMatches} hash={verify.PublicEntriesHashMatches}");
+
+        Check("انتشار نتیجه در حسابرسی ثبت شد", await CountAuditAsync("lottery.publish") == 1, "");
+        Check("دورهٔ بعد هنوز باز نشده است",
+            (await CountAsync("SELECT COUNT(*) FROM dbo.Rounds WHERE Status='Collecting'")) == 0, "");
     }
 
     private static async Task BaleBotApiParsingAsync()
