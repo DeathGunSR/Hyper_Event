@@ -41,6 +41,10 @@ final class Ebi_Campaign_Admin {
 			'withdraw_image' => array('page' => 'ebi-campaign-winners', 'cap' => 'ebi_publish_result', 'confirm' => false),
 			'refresh_cache'  => array('page' => 'ebi-campaign', 'cap' => 'ebi_view_campaign', 'confirm' => false),
 			'save_settings'  => array('page' => 'ebi-campaign-settings', 'cap' => 'manage_options', 'confirm' => false),
+			'save_sms_template'   => array('page' => 'ebi-campaign-sms', 'cap' => 'ebi_send_sms', 'confirm' => false),
+			'delete_sms_template' => array('page' => 'ebi-campaign-sms', 'cap' => 'ebi_send_sms', 'confirm' => true),
+			'preview_sms'         => array('page' => 'ebi-campaign-sms', 'cap' => 'ebi_send_sms', 'confirm' => false),
+			'send_sms'            => array('page' => 'ebi-campaign-sms', 'cap' => 'ebi_send_sms', 'confirm' => true),
 		);
 	}
 
@@ -72,6 +76,7 @@ final class Ebi_Campaign_Admin {
 			'ebi-campaign-held'     => array(__('فاکتورهای انتظار', 'ebi-campaign'), 'page_held'),
 			'ebi-campaign-lottery'  => array(__('قرعه‌کشی', 'ebi-campaign'), 'page_lottery'),
 			'ebi-campaign-winners'  => array(__('برندگان و تصاویر', 'ebi-campaign'), 'page_winners'),
+			'ebi-campaign-sms'      => array(__('پیامک', 'ebi-campaign'), 'page_sms'),
 			'ebi-campaign-settings' => array(__('تنظیمات', 'ebi-campaign'), 'page_settings'),
 		);
 		foreach ($pages as $slug => $config) {
@@ -291,21 +296,102 @@ final class Ebi_Campaign_Admin {
 				Ebi_Campaign_Api::flush_cache();
 				return __('کش اطلاعات کمپین تازه شد.', 'ebi-campaign');
 
+			case 'save_sms_template':
+				$saved = Ebi_Campaign_Sms::save_template(array(
+					'id'   => isset($_POST['template_id']) ? (int) $_POST['template_id'] : 0,
+					'name' => isset($_POST['template_name']) ? sanitize_text_field(wp_unslash((string) $_POST['template_name'])) : '',
+					'kind' => isset($_POST['template_kind']) ? sanitize_key(wp_unslash((string) $_POST['template_kind'])) : 'general',
+					'body' => isset($_POST['template_body']) ? sanitize_textarea_field(wp_unslash((string) $_POST['template_body'])) : '',
+				));
+				if (is_wp_error($saved)) {
+					return $saved;
+				}
+				return __('قالب پیامک ذخیره شد.', 'ebi-campaign');
+
+			case 'delete_sms_template':
+				$template_id = isset($_POST['template_id']) ? (int) $_POST['template_id'] : 0;
+				return Ebi_Campaign_Sms::delete_template($template_id)
+					? __('قالب پیامک حذف شد.', 'ebi-campaign')
+					: new WP_Error('ebi_sms_missing', __('قالب پیامک پیدا نشد.', 'ebi-campaign'));
+
+			case 'preview_sms':
+				$template_id = isset($_POST['template_id']) ? (int) $_POST['template_id'] : 0;
+				$template    = Ebi_Campaign_Sms::template($template_id);
+				if ($template === null) {
+					return new WP_Error('ebi_sms_missing', __('قالب پیامک پیدا نشد.', 'ebi-campaign'));
+				}
+				$preview = Ebi_Campaign_Sms::preview((string) $template['body'], array(
+					'name'  => __('مشتری نمونه', 'ebi-campaign'),
+					'mobile' => '0912***0000',
+					'round' => '1',
+					'points' => '10',
+					'invoice_count' => '1',
+					'prize' => (string) Ebi_Campaign_Settings::get('prize_label', ''),
+					'date'  => current_time('mysql'),
+				));
+				if (is_wp_error($preview)) {
+					return $preview;
+				}
+				set_transient(Ebi_Campaign_Sms::PREVIEW_KEY . get_current_user_id(), (string) $preview, 300);
+				return __('پیش‌نمایش متن آماده شد؛ هیچ پیامکی ارسال نشد.', 'ebi-campaign');
+
+			case 'send_sms':
+				$template_id = isset($_POST['template_id']) ? (int) $_POST['template_id'] : 0;
+				$source      = isset($_POST['recipient_source']) ? sanitize_key(wp_unslash((string) $_POST['recipient_source'])) : 'round';
+				$round_no    = isset($_POST['round_no']) ? (int) $_POST['round_no'] : 0;
+				$test_mobile = isset($_POST['test_mobile']) ? sanitize_text_field(wp_unslash((string) $_POST['test_mobile'])) : '';
+				$confirmed   = !empty($_POST['confirm']);
+
+				if ('test' === $source) {
+					$recipient = Ebi_Campaign_Sms::test_recipient($test_mobile);
+					if (is_wp_error($recipient)) {
+						return $recipient;
+					}
+					$recipients = array($recipient);
+				} else {
+					$recipients = Ebi_Campaign_Sms::winners_of_round($round_no);
+					if (is_wp_error($recipients)) {
+						return $recipients;
+					}
+				}
+
+				$result = Ebi_Campaign_Sms::send_manual(
+					$template_id,
+					$recipients,
+					wp_get_current_user()->user_login,
+					$confirmed
+				);
+				if (is_wp_error($result)) {
+					return $result;
+				}
+				return sprintf(
+					/* translators: ۱: ارسال موفق، ۲: ناموفق، ۳: نامشخص. */
+					__('ارسال دستی انجام شد: %1$s موفق، %2$s ناموفق، %3$s نامشخص. موارد نامشخص را از تاریخچه بررسی کنید و به‌صورت خودکار تکرار نمی‌شوند.', 'ebi-campaign'),
+					number_format_i18n((int) $result['sent']),
+					number_format_i18n((int) $result['failed']),
+					number_format_i18n((int) $result['unknown'])
+				);
+
 			case 'save_settings':
 				$input = isset($_POST['ebi_settings']) && is_array($_POST['ebi_settings'])
 					? wp_unslash($_POST['ebi_settings']) // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
 					: array();
 				Ebi_Campaign_Settings::save(is_array($input) ? $input : array());
 
+				$sms_input = isset($_POST['ebi_sms']) && is_array($_POST['ebi_sms'])
+					? wp_unslash($_POST['ebi_sms']) // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
+					: array();
+				Ebi_Campaign_Sms::save_settings(is_array($sms_input) ? $sms_input : array());
+
 				$keys = isset($_POST['ebi_keys']) && is_array($_POST['ebi_keys']) ? wp_unslash($_POST['ebi_keys']) : array();
 				if (is_array($keys)) {
-					foreach ($keys as $role => $value) {
-						$role  = sanitize_text_field((string) $role);
-						$value = is_string($value) ? trim($value) : '';
-						if ($value !== '') {
-							Ebi_Campaign_Settings::store_secret($role, $value);
-						}
+				foreach ($keys as $role => $value) {
+					$role  = sanitize_text_field((string) $role);
+					$value = is_string($value) ? trim($value) : '';
+					if ($value !== '') {
+						Ebi_Campaign_Settings::store_secret($role, $value);
 					}
+				}
 				}
 				return __('تنظیمات ذخیره شد.', 'ebi-campaign');
 		}
@@ -820,6 +906,186 @@ final class Ebi_Campaign_Admin {
 	/**
 	 * صفحهٔ تنظیمات.
 	 */
+	/**
+	 * صفحهٔ پیامک: قالب‌ها، پیش‌نمایش، ارسال دستی و تاریخچه.
+	 *
+	 * هیچ ارسال خودکاری در این صفحه یا بیرون از آن وجود ندارد؛ دکمهٔ ارسال پس از
+	 * تأیید صریح، یک دسته را با اقدام کاربر می‌فرستد.
+	 */
+	public static function page_sms(): void {
+		$templates = Ebi_Campaign_Sms::templates();
+		$settings  = Ebi_Campaign_Sms::settings();
+		$summary   = Ebi_Campaign_Sms::log_summary();
+		$edit_id   = isset($_GET['template']) ? (int) $_GET['template'] : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		$editing   = $edit_id > 0 ? Ebi_Campaign_Sms::template($edit_id) : null;
+		$preview   = get_transient(Ebi_Campaign_Sms::PREVIEW_KEY . get_current_user_id());
+
+		echo '<div class="wrap ebi-admin" dir="rtl">';
+		echo '<h1>' . esc_html__('پیامک کمپین (ارسال دستی)', 'ebi-campaign') . '</h1>';
+		self::print_notice();
+
+		if (!current_user_can('ebi_send_sms')) {
+			echo '<p class="notice notice-error"><strong>' . esc_html__('شما مجوز ارسال پیامک را ندارید. کنترل مجوز در سرور اعمال می‌شود و فقط پنهان‌کردن دکمه نیست.', 'ebi-campaign') . '</strong></p>';
+		}
+
+		if (is_string($preview) && $preview !== '') {
+			delete_transient(Ebi_Campaign_Sms::PREVIEW_KEY . get_current_user_id());
+			echo '<h2>' . esc_html__('پیش‌نمایش متن (ارسال نشده)', 'ebi-campaign') . '</h2>';
+			echo '<pre class="ebi-code ebi-sms-preview">' . esc_html($preview) . '</pre>';
+		}
+
+		$config_ready = $settings['username'] !== '' && $settings['sender'] !== '' && Ebi_Campaign_Settings::secret('sms.send') !== '';
+		if (!$config_ready) {
+			echo '<p class="notice notice-warning"><strong>' . esc_html__('تنظیمات ملی‌پیامک کامل نیست؛ ارسال واقعی غیرفعال است. نام کاربری، شمارهٔ فرستنده و رمز را در صفحهٔ تنظیمات وارد کنید.', 'ebi-campaign') . '</strong></p>';
+		}
+
+		// ---- قالب ----
+		echo '<h2>' . esc_html($editing ? __('ویرایش قالب', 'ebi-campaign') : __('قالب جدید', 'ebi-campaign')) . '</h2>';
+		echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="ebi-sms-form">';
+		echo '<input type="hidden" name="action" value="' . esc_attr(self::ACTION) . '" />';
+		echo '<input type="hidden" name="ebi_op" value="save_sms_template" />';
+		echo '<input type="hidden" name="template_id" value="' . esc_attr((string) ($editing['id'] ?? 0)) . '" />';
+		wp_nonce_field(self::ACTION);
+
+		echo '<p><label for="ebi-sms-name">' . esc_html__('نام قالب', 'ebi-campaign') . '</label><br />';
+		echo '<input type="text" class="regular-text" id="ebi-sms-name" name="template_name" value="' . esc_attr((string) ($editing['name'] ?? '')) . '" /></p>';
+
+		echo '<p><label for="ebi-sms-kind">' . esc_html__('نوع', 'ebi-campaign') . '</label><br />';
+		echo '<select id="ebi-sms-kind" name="template_kind">';
+		echo '<option value="general" ' . selected((string) ($editing['kind'] ?? 'general'), 'general', false) . '>' . esc_html__('عمومی', 'ebi-campaign') . '</option>';
+		echo '<option value="winner" ' . selected((string) ($editing['kind'] ?? ''), 'winner', false) . '>' . esc_html__('تبریک برنده', 'ebi-campaign') . '</option>';
+		echo '</select></p>';
+
+		echo '<p><label for="ebi-sms-body">' . esc_html__('متن پیام', 'ebi-campaign') . '</label><br />';
+		echo '<textarea id="ebi-sms-body" name="template_body" rows="5" class="large-text">' . esc_textarea((string) ($editing['body'] ?? '')) . '</textarea></p>';
+
+		echo '<p class="description">' . esc_html__('متغیرهای مجاز:', 'ebi-campaign') . ' ';
+		$labels = array();
+		foreach (Ebi_Campaign_Sms::variables() as $token => $label) {
+			$labels[] = $token . ' (' . $label . ')';
+		}
+		echo esc_html(implode(' • ', $labels)) . '</p>';
+
+		echo '<p><button type="submit" class="button button-primary">' . esc_html__('ذخیرهٔ قالب', 'ebi-campaign') . '</button>';
+		if ($editing) {
+			echo ' <a class="button" href="' . esc_url(admin_url('admin.php?page=ebi-campaign-sms')) . '">' . esc_html__('قالب جدید', 'ebi-campaign') . '</a>';
+		}
+		echo '</p></form>';
+
+		// ---- فهرست قالب‌ها ----
+		echo '<h2>' . esc_html__('قالب‌های ذخیره‌شده', 'ebi-campaign') . '</h2>';
+		if (empty($templates)) {
+			echo '<p>' . esc_html__('هنوز قالبی ساخته نشده است.', 'ebi-campaign') . '</p>';
+		} else {
+			echo '<table class="widefat striped"><thead><tr>';
+			echo '<th>' . esc_html__('نام', 'ebi-campaign') . '</th>';
+			echo '<th>' . esc_html__('نوع', 'ebi-campaign') . '</th>';
+			echo '<th>' . esc_html__('متن', 'ebi-campaign') . '</th>';
+			echo '<th>' . esc_html__('آخرین ویرایش', 'ebi-campaign') . '</th>';
+			echo '<th>' . esc_html__('عملیات', 'ebi-campaign') . '</th>';
+			echo '</tr></thead><tbody>';
+			foreach ($templates as $template) {
+				echo '<tr><td>' . esc_html((string) $template['name']) . '</td>';
+				echo '<td>' . esc_html('winner' === $template['kind'] ? __('تبریک برنده', 'ebi-campaign') : __('عمومی', 'ebi-campaign')) . '</td>';
+				echo '<td>' . esc_html(mb_substr((string) $template['body'], 0, 80)) . '</td>';
+				echo '<td>' . esc_html((string) $template['updated']) . '</td><td>';
+				echo '<a class="button button-small" href="' . esc_url(admin_url('admin.php?page=ebi-campaign-sms&template=' . (int) $template['id'])) . '">' . esc_html__('ویرایش', 'ebi-campaign') . '</a> ';
+				self::action_form('preview_sms', array('template_id' => (int) $template['id']), __('پیش‌نمایش', 'ebi-campaign'), false, true);
+				self::action_form('delete_sms_template', array('template_id' => (int) $template['id']), __('حذف', 'ebi-campaign'), true, true);
+				echo '</td></tr>';
+			}
+			echo '</tbody></table>';
+		}
+
+		// ---- ارسال دستی ----
+		echo '<h2>' . esc_html__('ارسال دستی', 'ebi-campaign') . '</h2>';
+		echo '<p class="description">' . esc_html__('هیچ پیامکی خودکار ارسال نمی‌شود. متن نهایی و تعداد گیرندگان را پیش از ارسال ببینید و تأیید کنید. سقف هر دسته ۵۰۰ گیرنده است.', 'ebi-campaign') . '</p>';
+		echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" class="ebi-sms-send">';
+		echo '<input type="hidden" name="action" value="' . esc_attr(self::ACTION) . '" />';
+		echo '<input type="hidden" name="ebi_op" value="send_sms" />';
+		wp_nonce_field(self::ACTION);
+
+		echo '<p><label for="ebi-sms-template">' . esc_html__('قالب', 'ebi-campaign') . '</label><br /><select id="ebi-sms-template" name="template_id">';
+		foreach ($templates as $template) {
+			echo '<option value="' . esc_attr((string) $template['id']) . '">' . esc_html((string) $template['name']) . '</option>';
+		}
+		echo '</select></p>';
+
+		echo '<fieldset><legend>' . esc_html__('گیرندگان', 'ebi-campaign') . '</legend>';
+		echo '<p><label><input type="radio" name="recipient_source" value="round" checked="checked" /> ' . esc_html__('برندهٔ یک دوره', 'ebi-campaign') . '</label> ';
+		echo '<input type="number" min="1" name="round_no" value="1" class="small-text" /></p>';
+		echo '<p><label><input type="radio" name="recipient_source" value="test" /> ' . esc_html__('شمارهٔ آزمایشی (فقط با تأیید صریح)', 'ebi-campaign') . '</label> ';
+		echo '<input type="text" name="test_mobile" value="" placeholder="09xxxxxxxxx" />';
+		echo '<span class="description">' . esc_html__('برای آزمون واقعی فقط شمارهٔ آزمایشی مجاز استفاده کنید.', 'ebi-campaign') . '</span></p>';
+		echo '</fieldset>';
+
+		echo '<p><label class="ebi-confirm"><input type="checkbox" name="confirm" value="1" /> ' . esc_html__('متن و تعداد گیرندگان را بررسی کردم و ارسال را تأیید می‌کنم.', 'ebi-campaign') . '</label></p>';
+		echo '<p><button type="submit" class="button button-primary" ' . ($config_ready ? '' : 'disabled="disabled"') . '>' . esc_html__('ارسال دستی پیامک', 'ebi-campaign') . '</button></p>';
+		echo '</form>';
+
+		// ---- تاریخچه ----
+		echo '<h2>' . esc_html__('تاریخچهٔ ارسال', 'ebi-campaign') . '</h2>';
+		echo '<p>' . sprintf(
+			/* translators: ۱: موفق، ۲: ناموفق، ۳: نامشخص، ۴: در انتظار. */
+			esc_html__('موفق: %1$s • ناموفق: %2$s • نامشخص: %3$s • در انتظار: %4$s', 'ebi-campaign'),
+			esc_html(number_format_i18n((int) $summary['sent'])),
+			esc_html(number_format_i18n((int) $summary['failed'])),
+			esc_html(number_format_i18n((int) $summary['unknown'])),
+			esc_html(number_format_i18n((int) $summary['pending']))
+		) . '</p>';
+
+		$filter = array(
+			'status' => isset($_GET['sms_status']) ? sanitize_key((string) $_GET['sms_status']) : '', // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			'search' => isset($_GET['sms_search']) ? sanitize_text_field(wp_unslash((string) $_GET['sms_search'])) : '', // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			'from'   => isset($_GET['sms_from']) ? sanitize_text_field((string) $_GET['sms_from']) : '', // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			'to'     => isset($_GET['sms_to']) ? sanitize_text_field((string) $_GET['sms_to']) : '', // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+		);
+
+		echo '<form method="get" class="ebi-sms-filter">';
+		echo '<input type="hidden" name="page" value="ebi-campaign-sms" />';
+		echo '<select name="sms_status"><option value="">' . esc_html__('همهٔ وضعیت‌ها', 'ebi-campaign') . '</option>';
+		foreach (array('sent' => __('موفق', 'ebi-campaign'), 'failed' => __('ناموفق', 'ebi-campaign'), 'unknown' => __('نامشخص', 'ebi-campaign'), 'pending' => __('در انتظار', 'ebi-campaign')) as $value => $label) {
+			echo '<option value="' . esc_attr($value) . '" ' . selected($filter['status'], $value, false) . '>' . esc_html($label) . '</option>';
+		}
+		echo '</select> ';
+		echo '<input type="search" name="sms_search" value="' . esc_attr($filter['search']) . '" placeholder="' . esc_attr__('جست‌وجو', 'ebi-campaign') . '" /> ';
+		echo '<input type="date" name="sms_from" value="' . esc_attr($filter['from']) . '" /> ';
+		echo '<input type="date" name="sms_to" value="' . esc_attr($filter['to']) . '" /> ';
+		echo '<button type="submit" class="button">' . esc_html__('فیلتر', 'ebi-campaign') . '</button>';
+		echo '</form>';
+
+		$entries = Ebi_Campaign_Sms::log_entries($filter, 100);
+		if (empty($entries)) {
+			echo '<p>' . esc_html__('رکوردی برای نمایش نیست.', 'ebi-campaign') . '</p>';
+		} else {
+			echo '<table class="widefat striped"><thead><tr>';
+			foreach (array(__('زمان', 'ebi-campaign'), __('گیرنده', 'ebi-campaign'), __('قالب', 'ebi-campaign'), __('وضعیت', 'ebi-campaign'), __('شناسهٔ سرویس', 'ebi-campaign'), __('کد/پیام', 'ebi-campaign'), __('اقدام‌کننده', 'ebi-campaign')) as $head) {
+				echo '<th>' . esc_html($head) . '</th>';
+			}
+			echo '</tr></thead><tbody>';
+			$status_labels = array(
+				'sent'    => __('موفق', 'ebi-campaign'),
+				'failed'  => __('ناموفق', 'ebi-campaign'),
+				'unknown' => __('نامشخص — نیازمند بررسی', 'ebi-campaign'),
+				'pending' => __('در انتظار', 'ebi-campaign'),
+			);
+			foreach ($entries as $entry) {
+				echo '<tr>';
+				echo '<td>' . esc_html((string) ($entry['at'] ?? '')) . '</td>';
+				echo '<td>' . esc_html((string) ($entry['to'] ?? '')) . '</td>';
+				echo '<td>' . esc_html((string) ($entry['template'] ?? '')) . '</td>';
+				echo '<td>' . esc_html($status_labels[ (string) ($entry['status'] ?? '') ] ?? (string) ($entry['status'] ?? '')) . '</td>';
+				echo '<td>' . esc_html((string) ($entry['rec_id'] ?? '')) . '</td>';
+				echo '<td>' . esc_html(trim((string) ($entry['code'] ?? '') . ' ' . (string) ($entry['message'] ?? ''))) . '</td>';
+				echo '<td>' . esc_html((string) ($entry['actor'] ?? '')) . '</td>';
+				echo '</tr>';
+			}
+			echo '</tbody></table>';
+		}
+
+		echo '</div>';
+	}
+
 	public static function page_settings(): void {
 		$settings = Ebi_Campaign_Settings::all();
 		$status   = Ebi_Campaign_Settings::secret_status();
@@ -847,6 +1113,20 @@ final class Ebi_Campaign_Admin {
 		echo esc_html__('فقط برای محیط آزمایش محلی (localhost). در سایت عملیاتی خاموش بماند.', 'ebi-campaign') . '</label></td></tr>';
 		echo '</tbody></table>';
 
+		$sms = Ebi_Campaign_Sms::settings();
+		echo '<h2>' . esc_html__('ملی‌پیامک (ارسال دستی)', 'ebi-campaign') . '</h2>';
+		echo '<p class="description">' . esc_html__('این تنظیمات فقط برای ارسال دستی از پنل است؛ هیچ رویدادی پیامک خودکار نمی‌فرستد. رمز حساب در همان بخش کلیدها ذخیره می‌شود و هرگز چاپ نمی‌شود.', 'ebi-campaign') . '</p>';
+		echo '<table class="form-table" role="presentation"><tbody>';
+		echo '<tr><th scope="row"><label for="ebi-sms-username">' . esc_html__('نام کاربری پنل ملی‌پیامک', 'ebi-campaign') . '</label></th><td>';
+		echo '<input type="text" class="regular-text" id="ebi-sms-username" name="ebi_sms[username]" value="' . esc_attr((string) $sms['username']) . '" /></td></tr>';
+		echo '<tr><th scope="row"><label for="ebi-sms-sender">' . esc_html__('شمارهٔ فرستنده', 'ebi-campaign') . '</label></th><td>';
+		echo '<input type="text" class="regular-text" id="ebi-sms-sender" name="ebi_sms[sender]" value="' . esc_attr((string) $sms['sender']) . '" />';
+		echo '<p class="description">' . esc_html__('فقط رقم؛ مانند 1000xxxx.', 'ebi-campaign') . '</p></td></tr>';
+		echo '<tr><th scope="row"><label for="ebi-sms-base">' . esc_html__('آدرس سرویس پیامک', 'ebi-campaign') . '</label></th><td>';
+		echo '<input type="text" class="regular-text" id="ebi-sms-base" name="ebi_sms[api_base]" value="' . esc_attr((string) $sms['api_base']) . '" />';
+		echo '<p class="description">' . esc_html__('پیش‌فرض: https://rest.payamak-panel.com', 'ebi-campaign') . '</p></td></tr>';
+		echo '</tbody></table>';
+
 		echo '<h2>' . esc_html__('کلیدهای سرویس‌به‌سرویس', 'ebi-campaign') . '</h2>';
 		echo '<p class="description">' . esc_html__('اگر کلیدها را در wp-config.php تعریف کنید، در پایگاه داده ذخیره نمی‌شوند و این فیلدها نادیده گرفته می‌شوند. مقدار کلید هیچ‌گاه در صفحه یا JavaScript چاپ نمی‌شود.', 'ebi-campaign') . '</p>';
 		echo '<table class="form-table" role="presentation"><tbody>';
@@ -857,6 +1137,7 @@ final class Ebi_Campaign_Admin {
 			'lottery.run'     => __('کلید اجرای قرعه‌کشی', 'ebi-campaign'),
 			'lottery.publish' => __('کلید انتشار نتیجه و تصویر', 'ebi-campaign'),
 			'privacy.contact' => __('کلید مشاهدهٔ شمارهٔ برنده', 'ebi-campaign'),
+			'sms.send'        => __('رمز حساب ملی‌پیامک (فقط ارسال دستی)', 'ebi-campaign'),
 		);
 		foreach ($labels as $role => $label) {
 			$current = isset($status[ $role ]) ? (string) $status[ $role ] : '';
@@ -887,7 +1168,7 @@ define( \'EBI_CAMPAIGN_CAMPAIGN_KEY\', \'...\' );
 define( \'EBI_CAMPAIGN_REVIEW_KEY\', \'...\' );
 define( \'EBI_CAMPAIGN_LOTTERY_KEY\', \'...\' );
 define( \'EBI_CAMPAIGN_PUBLISH_KEY\', \'...\' );
-define( \'EBI_CAMPAIGN_PRIVACY_KEY\', \'...\' );</pre>';
+define( \'EBI_CAMPAIGN_PRIVACY_KEY\', \'...\' );\ndefine( \'EBI_CAMPAIGN_SMS_PASSWORD\', \'...\' );</pre>';
 		echo '</div>';
 	}
 

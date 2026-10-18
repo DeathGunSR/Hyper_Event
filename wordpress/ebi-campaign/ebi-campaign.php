@@ -29,6 +29,7 @@ require_once EBI_CAMPAIGN_DIR . 'includes/class-ebi-campaign-settings.php';
 require_once EBI_CAMPAIGN_DIR . 'includes/class-ebi-campaign-api.php';
 require_once EBI_CAMPAIGN_DIR . 'includes/class-ebi-campaign-images.php';
 require_once EBI_CAMPAIGN_DIR . 'includes/class-ebi-campaign-pages.php';
+require_once EBI_CAMPAIGN_DIR . 'includes/class-ebi-campaign-sms.php';
 require_once EBI_CAMPAIGN_DIR . 'includes/class-ebi-campaign-admin.php';
 
 /**
@@ -47,6 +48,7 @@ function ebi_campaign_capability_map(): array {
 		'ebi_run_lottery'     => 'lottery.run',      // تثبیت مجموعه، انتخاب و نهایی‌سازی.
 		'ebi_publish_result'  => 'lottery.publish',  // انتشار عمومی نتیجه و تصویر برنده.
 		'ebi_view_private'    => 'privacy.contact',  // شمارهٔ کامل برنده برای تماس.
+		'ebi_send_sms'        => '',                 // ارسال دستی پیامک (بدون هیچ ارسال خودکار).
 	);
 }
 

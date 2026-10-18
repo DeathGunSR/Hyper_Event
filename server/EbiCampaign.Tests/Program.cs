@@ -8,6 +8,7 @@ using EbiCampaign.Api;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace EbiCampaign.Tests;
 
@@ -43,6 +44,21 @@ internal static class Program
     /// <summary>ارائه‌دهندهٔ جعلی عضویت بله: فقط در حافظه، برای آزمون رفتار مجاز/غیرمجاز.</summary>
     private static bool _baleReady;
     private static readonly HashSet<string> BaleMembers = new(StringComparer.Ordinal);
+
+    /// <summary>Bot API جعلی بله؛ پاسخ هر حساب در هر آزمون تعیین می‌شود.</summary>
+    private static readonly FakeBaleBotApi FakeBale = new();
+
+    private sealed class FakeBaleBotApi : IBaleBotApi
+    {
+        public Dictionary<long, BaleMemberResult> Results { get; } = new();
+
+        public Task<BaleMemberResult> GetChatMemberAsync(long baleUserId, CancellationToken ct = default)
+            => Task.FromResult(Results.TryGetValue(baleUserId, out BaleMemberResult? r)
+                ? r : BaleMemberResult.Unknown("test-unknown"));
+
+        public Task<bool> SendMessageAsync(long chatId, string text, CancellationToken ct = default)
+            => Task.FromResult(true);
+    }
 
     private sealed class FakeBaleProvider : IBaleMembershipProvider
     {
@@ -84,12 +100,17 @@ internal static class Program
                 ["Auth:Roles:lottery.publish"] = RolePublish,
                 ["Auth:Roles:privacy.contact"] = RolePrivacy,
                 ["Campaign:PrizeToman"] = "10000000",
-                ["PublicApi:RateLimitPerMinute"] = "120"
+                ["PublicApi:RateLimitPerMinute"] = "120",
+                // بله در آزمون «پیکربندی‌شده» است ولی Bot API آن جعلی تزریق می‌شود.
+                ["Bale:Token"] = "test-token",
+                ["Bale:Channel"] = "@ebimarket"
             }, services =>
             {
                 // در استقرار واقعی، این سرویس با پیکربندی ربات بله جایگزین می‌شود؛
                 // در آزمون، ارائه‌دهندهٔ قطعی و بی‌شبکه تزریق می‌شود.
                 services.AddSingleton<IBaleMembershipProvider, FakeBaleProvider>();
+                // Bot API بله همیشه جعلی است تا آزمون‌ها به شبکهٔ خارجی وابسته نباشند.
+                services.AddSingleton<IBaleBotApi>(FakeBale);
             });
 
             await ApiHost.InitializeAsync(_app);
@@ -171,6 +192,15 @@ internal static class Program
             await RunAsync("۵۰. هیچ مسیر عمومی دادهٔ خصوصی افشا نمی‌کند", NoPublicLeakAsync);
             await RunAsync("۵۱. مجوزهای سرور‌محور از هم جدا هستند", CapabilitySeparationAsync);
             await RunAsync("۵۲. محدودکنندهٔ نرخ مسیرهای عمومی", RateLimiterAsync);
+
+            Console.WriteLine();
+            Console.WriteLine("=== Phase 3 — ربات بله و عضویت (بند ۹) ===");
+            await RunAsync("۵۳. ثبت‌نام بله فقط از مسیر امضاشدهٔ عامل", BaleRegisterAuthAsync);
+            await RunAsync("۵۴. ثبت‌نام بدون اشتراک‌گذاری شماره و با شمارهٔ نامعتبر رد می‌شود", BaleRegisterValidationAsync);
+            await RunAsync("۵۵. ثبت‌نام معتبر، جست‌وجو و جلوگیری از شمارهٔ تکراری", BaleRegisterFlowAsync);
+            await RunAsync("۵۶. وضعیت عضویت: عضو، غیرعضو و نامعلوم از هم جدا می‌شوند", BaleStatusAsync);
+            await RunAsync("۵۷. پنل بله فقط با مجوز حریم خصوصی و با شمارهٔ سانسورشده", BaleAdminAsync);
+            await RunAsync("۵۸. تفسیر پاسخ getChatMember و مدیریت خطا", BaleBotApiParsingAsync);
         }
         catch (Exception ex)
         {
@@ -192,6 +222,209 @@ internal static class Program
     // ------------------------------------------------------------------
     //  tests
     // ------------------------------------------------------------------
+    // ---------------- بله (فاز ۳) ----------------
+    private static async Task BaleRegisterAuthAsync()
+    {
+        string path = "/api/v1/agent/bale/register";
+        string body = JsonSerializer.Serialize(new { mobile = "09121234567", baleUserId = 501L, firstName = "آزمون", contactShared = true }, CampaignService.Json);
+
+        HttpResponseMessage unsigned = await _http.PostAsync(path, new StringContent(body, Encoding.UTF8, "application/json"));
+        Check("ثبت‌نام بدون امضای عامل = 401", unsigned.StatusCode == HttpStatusCode.Unauthorized,
+            await unsigned.Content.ReadAsStringAsync());
+
+        HttpResponseMessage forged = await PostRawSignedAsync(AgentA, "not-the-secret", path, body);
+        Check("امضای نامعتبر = 401", forged.StatusCode == HttpStatusCode.Unauthorized,
+            await forged.Content.ReadAsStringAsync());
+
+        HttpResponseMessage ok = await PostRawSignedAsync(AgentA, AgentASecret, path, body);
+        Check("امضای معتبر پذیرفته می‌شود", ok.StatusCode == HttpStatusCode.OK, await ok.Content.ReadAsStringAsync());
+    }
+
+    private static async Task BaleRegisterValidationAsync()
+    {
+        string path = "/api/v1/agent/bale/register";
+        string notShared = JsonSerializer.Serialize(new { mobile = "09121234567", baleUserId = 502L, firstName = "x", contactShared = false }, CampaignService.Json);
+        HttpResponseMessage r1 = await PostRawSignedAsync(AgentA, AgentASecret, path, notShared);
+        Check("بدون اشتراک‌گذاری شماره = 400", r1.StatusCode == HttpStatusCode.BadRequest, await r1.Content.ReadAsStringAsync());
+        Check("کد خطای contact_not_shared", (await r1.Content.ReadAsStringAsync()).Contains("contact_not_shared"), "");
+
+        string badMobile = JsonSerializer.Serialize(new { mobile = "12345", baleUserId = 503L, firstName = "x", contactShared = true }, CampaignService.Json);
+        HttpResponseMessage r2 = await PostRawSignedAsync(AgentA, AgentASecret, path, badMobile);
+        Check("شمارهٔ نامعتبر = 400", r2.StatusCode == HttpStatusCode.BadRequest, await r2.Content.ReadAsStringAsync());
+
+        string badUser = JsonSerializer.Serialize(new { mobile = "09121234567", baleUserId = 0L, firstName = "x", contactShared = true }, CampaignService.Json);
+        HttpResponseMessage r3 = await PostRawSignedAsync(AgentA, AgentASecret, path, badUser);
+        Check("شناسهٔ بلهٔ نامعتبر = 400", r3.StatusCode == HttpStatusCode.BadRequest, await r3.Content.ReadAsStringAsync());
+
+        long rows = await CountAsync("SELECT COUNT(*) FROM dbo.BaleRegistration");
+        Check("درخواست‌های نامعتبر ثبت‌نام نمی‌سازند", rows == 0, rows.ToString());
+    }
+
+    private static async Task BaleRegisterFlowAsync()
+    {
+        string path = "/api/v1/agent/bale/register";
+        string body = JsonSerializer.Serialize(new { mobile = "+98 912 123 4567", baleUserId = 501L, firstName = "آزمون", contactShared = true }, CampaignService.Json);
+        HttpResponseMessage r = await PostRawSignedAsync(AgentA, AgentASecret, path, body);
+        string json = await r.Content.ReadAsStringAsync();
+        Check("ثبت‌نام معتبر = 200", r.StatusCode == HttpStatusCode.OK, json);
+        Check("شماره یکسان‌سازی و سانسور شده است", json.Contains("0912***4567") && !json.Contains("+98"), json);
+        Check("کل شماره در پاسخ ثبت‌نام نیست", !json.Contains("09121234567"), json);
+
+        string other = JsonSerializer.Serialize(new { mobile = "09121234567", baleUserId = 502L, firstName = "دیگری", contactShared = true }, CampaignService.Json);
+        HttpResponseMessage dup = await PostRawSignedAsync(AgentB, AgentBSecret, path, other);
+        Check("شمارهٔ متصل به حساب دیگر = 409", dup.StatusCode == HttpStatusCode.Conflict, await dup.Content.ReadAsStringAsync());
+
+        string lookup = JsonSerializer.Serialize(new { baleUserId = 501L }, CampaignService.Json);
+        HttpResponseMessage lk = await PostRawSignedAsync(AgentA, AgentASecret, "/api/v1/agent/bale/lookup", lookup);
+        string lkJson = await lk.Content.ReadAsStringAsync();
+        Check("جست‌وجو شمارهٔ متصل را برمی‌گرداند", lkJson.Contains("09121234567") && lkJson.Contains("true"), lkJson);
+
+        string unknownLookup = JsonSerializer.Serialize(new { baleUserId = 777L }, CampaignService.Json);
+        HttpResponseMessage lk2 = await PostRawSignedAsync(AgentA, AgentASecret, "/api/v1/agent/bale/lookup", unknownLookup);
+        Check("حساب بدون ثبت‌نام پیدا نمی‌شود", (await lk2.Content.ReadAsStringAsync()).Contains("false"), "");
+
+        Check("ثبت‌نام در حسابرسی ثبت می‌شود", await CountAsync("SELECT COUNT(*) FROM dbo.AuditLog WHERE Action='bale.registered'") == 1, "");
+    }
+
+    private static async Task BaleStatusAsync()
+    {
+        string path = "/api/v1/agent/bale/register";
+        foreach ((long id, string mobile) in new[] { (601L, "09121110001"), (602L, "09121110002"), (603L, "09121110003") })
+        {
+            string body = JsonSerializer.Serialize(new { mobile, baleUserId = id, firstName = "x", contactShared = true }, CampaignService.Json);
+            await PostRawSignedAsync(AgentA, AgentASecret, path, body);
+        }
+
+        FakeBale.Results[601] = new BaleMemberResult("member", true, "status=member;is_member=false");
+        FakeBale.Results[602] = new BaleMemberResult("left", false, "status=left;is_member=false");
+        // 603 عمداً نتیجه‌ای ندارد تا «نامعلوم» آزموده شود.
+
+        async Task<(HttpStatusCode code, string json)> StatusAsync(string mobile)
+        {
+            string body = JsonSerializer.Serialize(new { mobile }, CampaignService.Json);
+            HttpResponseMessage r = await PostRawSignedAsync(AgentA, AgentASecret, "/api/v1/agent/bale/status", body);
+            return (r.StatusCode, await r.Content.ReadAsStringAsync());
+        }
+
+        (HttpStatusCode c1, string j1) = await StatusAsync("09121110001");
+        Check("عضو کانال = member و واجد شرایط", c1 == HttpStatusCode.OK && j1.Contains("\"member\"") && j1.Contains("\"eligible\":true"), j1);
+        Check("پاسخ وضعیت شمارهٔ کامل ندارد", !j1.Contains("09121110001"), j1);
+
+        (HttpStatusCode c2, string j2) = await StatusAsync("09121110002");
+        Check("غیرعضو = not_member و واجد شرایط نیست", c2 == HttpStatusCode.OK && j2.Contains("not_member") && j2.Contains("\"eligible\":false"), j2);
+
+        (HttpStatusCode c3, string j3) = await StatusAsync("09121110003");
+        Check("خطای ارائه‌دهنده = unknown", c3 == HttpStatusCode.OK && j3.Contains("\"unknown\"") && j3.Contains("\"eligible\":false"), j3);
+        Check("«نامعلوم» هرگز تأیید عضویت نیست", !j3.Contains("عضویت شما در کانال تأیید شد"), j3);
+
+        (HttpStatusCode c4, string j4) = await StatusAsync("09129999999");
+        Check("شمارهٔ ثبت‌نشده = registered:false", c4 == HttpStatusCode.OK && j4.Contains("\"registered\":false"), j4);
+
+        Check("هر بررسی عضویت شاهد ثبت می‌کند",
+            await CountAsync("SELECT COUNT(*) FROM dbo.BaleMembershipCheck") >= 3, "");
+    }
+
+    private static async Task BaleAdminAsync()
+    {
+        string body = JsonSerializer.Serialize(new { mobile = "09127770001", baleUserId = 701L, firstName = "x", contactShared = true }, CampaignService.Json);
+        await PostRawSignedAsync(AgentA, AgentASecret, "/api/v1/agent/bale/register", body);
+        FakeBale.Results[701] = new BaleMemberResult("member", true, "status=member");
+
+        HttpResponseMessage noKey = await _http.GetAsync("/api/v1/admin/bale/registrations");
+        Check("فهرست ثبت‌نام‌ها بدون کلید = 401", noKey.StatusCode == HttpStatusCode.Unauthorized, "");
+
+        using HttpRequestMessage manage = new(HttpMethod.Get, "/api/v1/admin/bale/registrations");
+        manage.Headers.Add("X-Admin-Key", RoleCampaign);
+        HttpResponseMessage wrongCap = await _http.SendAsync(manage);
+        Check("کلید مدیریت کمپین به حریم خصوصی دسترسی ندارد", wrongCap.StatusCode == HttpStatusCode.Unauthorized, "");
+
+        using HttpRequestMessage good = new(HttpMethod.Get, "/api/v1/admin/bale/registrations");
+        good.Headers.Add("X-Admin-Key", RolePrivacy);
+        HttpResponseMessage list = await _http.SendAsync(good);
+        string json = await list.Content.ReadAsStringAsync();
+        Check("فهرست با مجوز حریم خصوصی = 200", list.StatusCode == HttpStatusCode.OK, json);
+        Check("فهرست فقط شمارهٔ سانسورشده دارد", json.Contains("0912***0001") && !json.Contains("09127770001"), json);
+
+        HttpResponseMessage check = await AdminPostKeyAsync("/api/v1/admin/bale/check", RolePrivacy, new { mobile = "09127770001" });
+        Check("بررسی عضویت از پنل = 200", check.StatusCode == HttpStatusCode.OK, await check.Content.ReadAsStringAsync());
+
+        HttpResponseMessage denied = await AdminPostKeyAsync("/api/v1/admin/bale/check", RolePublish, new { mobile = "09127770001" });
+        Check("کلید انتشار نتیجه اجازهٔ بررسی ندارد", denied.StatusCode == HttpStatusCode.Unauthorized, "");
+    }
+
+    private static async Task BaleBotApiParsingAsync()
+    {
+        static BaleBotApi Build(string json, HttpStatusCode code = HttpStatusCode.OK, bool throwNetwork = false)
+        {
+            StubHandler handler = new(json, code, throwNetwork);
+            HttpClient http = new(handler) { BaseAddress = new Uri("https://bale.test") };
+            BaleOptions opt = new() { Token = "t", Channel = "@ebimarket", ApiBase = "https://bale.test" };
+            return new BaleBotApi(http, opt, NullLogger<BaleBotApi>.Instance);
+        }
+
+        BaleMemberResult member = await Build("{\"ok\":true,\"result\":{\"status\":\"member\"}}").GetChatMemberAsync(1);
+        Check("پاسخ member به عضویت تفسیر می‌شود", member.IsMember, member.Evidence);
+
+        BaleMemberResult admin = await Build("{\"ok\":true,\"result\":{\"status\":\"administrator\"}}").GetChatMemberAsync(1);
+        Check("مدیر کانال هم عضو است", admin.IsMember, admin.Evidence);
+
+        BaleMemberResult restricted = await Build("{\"ok\":true,\"result\":{\"status\":\"restricted\",\"is_member\":true}}").GetChatMemberAsync(1);
+        Check("عضو محدودشده با is_member=true عضو است", restricted.IsMember, restricted.Evidence);
+
+        BaleMemberResult left = await Build("{\"ok\":true,\"result\":{\"status\":\"left\"}}").GetChatMemberAsync(1);
+        Check("status=left عضو نیست", !left.IsMember && left.Status == "left", left.Evidence);
+
+        BaleMemberResult error = await Build("{\"ok\":false,\"description\":\"Forbidden\"}", HttpStatusCode.Forbidden).GetChatMemberAsync(1);
+        Check("خطای HTTP = نامعلوم", !error.IsMember && error.Status == "unknown", error.Evidence);
+
+        BaleMemberResult network = await Build("{}", HttpStatusCode.OK, throwNetwork: true).GetChatMemberAsync(1);
+        Check("خطای شبکه = نامعلوم", !network.IsMember && network.Status == "unknown", network.Evidence);
+
+        BaleBotApi notConfigured = new(new HttpClient { BaseAddress = new Uri("https://bale.test") },
+            new BaleOptions(), NullLogger<BaleBotApi>.Instance);
+        BaleMemberResult none = await notConfigured.GetChatMemberAsync(1);
+        Check("بدون پیکربندی، ارائه‌دهنده هیچ‌وقت عضو اعلام نمی‌کند", !none.IsMember, none.Evidence);
+    }
+
+    private sealed class StubHandler : HttpMessageHandler
+    {
+        private readonly string _json;
+        private readonly HttpStatusCode _code;
+        private readonly bool _throw;
+
+        public StubHandler(string json, HttpStatusCode code, bool throwNetwork)
+        {
+            _json = json;
+            _code = code;
+            _throw = throwNetwork;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
+        {
+            if (_throw) throw new HttpRequestException("network down");
+            return Task.FromResult(new HttpResponseMessage(_code)
+            {
+                Content = new StringContent(_json, Encoding.UTF8, "application/json")
+            });
+        }
+    }
+
+    private static async Task<HttpResponseMessage> AdminPostKeyAsync(string path, string key, object payload)
+    {
+        using HttpRequestMessage msg = new(HttpMethod.Post, path);
+        msg.Headers.Add("X-Admin-Key", key);
+        msg.Content = JsonContent(payload);
+        return await _http.SendAsync(msg);
+    }
+
+    private static async Task<long> CountAsync(string sql)
+    {
+        await using SqlConnection cn = new(TestCs);
+        await cn.OpenAsync();
+        using SqlCommand cmd = new(sql, cn);
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync());
+    }
+
     private static async Task HealthAsync()
     {
         HttpResponseMessage r = await _http.GetAsync("/health");
@@ -1624,6 +1857,7 @@ WHERE RoundId=@rid;", ("@n", count), ("@rid", roundId));
             await ResetDataAsync();
             _baleReady = false;
             BaleMembers.Clear();
+            FakeBale.Results.Clear();
             await test();
         }
         catch (Exception ex)
@@ -1736,6 +1970,8 @@ WHERE RoundId=@rid;", ("@n", count), ("@rid", roundId));
         await cn.OpenAsync();
         using SqlCommand cmd = new(@"
 DELETE FROM dbo.InvoiceDecisions;
+DELETE FROM dbo.BaleMembershipCheck;
+DELETE FROM dbo.BaleRegistration;
 DELETE FROM dbo.LotteryRuns;      /* آبشار به LotteryEntries */
 DELETE FROM dbo.AuditLog;
 DELETE FROM dbo.IngestRequests;

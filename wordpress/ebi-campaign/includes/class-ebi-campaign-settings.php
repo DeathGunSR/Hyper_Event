@@ -146,6 +146,7 @@ final class Ebi_Campaign_Settings {
 			'lottery.run'     => 'EBI_CAMPAIGN_LOTTERY_KEY',
 			'lottery.publish' => 'EBI_CAMPAIGN_PUBLISH_KEY',
 			'privacy.contact' => 'EBI_CAMPAIGN_PRIVACY_KEY',
+			'sms.send'        => 'EBI_CAMPAIGN_SMS_PASSWORD',
 		);
 
 		$keys = array();
@@ -174,7 +175,7 @@ final class Ebi_Campaign_Settings {
 	 * @param string|null $value مقدار جدید؛ null یعنی حذف.
 	 */
 	public static function store_secret(string $role, ?string $value): void {
-		$allowed = array('admin', 'campaign.manage', 'review.decide', 'lottery.run', 'lottery.publish', 'privacy.contact');
+		$allowed = array('admin', 'campaign.manage', 'review.decide', 'lottery.run', 'lottery.publish', 'privacy.contact', 'sms.send');
 		if (!in_array($role, $allowed, true)) {
 			return;
 		}
@@ -209,7 +210,7 @@ final class Ebi_Campaign_Settings {
 	public static function secret_status(): array {
 		$keys     = self::secret_map();
 		$status   = array();
-		$explicit = array('admin', 'campaign.manage', 'review.decide', 'lottery.run', 'lottery.publish', 'privacy.contact');
+		$explicit = array('admin', 'campaign.manage', 'review.decide', 'lottery.run', 'lottery.publish', 'privacy.contact', 'sms.send');
 		foreach ($explicit as $role) {
 			$value = isset($keys[$role]) ? $keys[$role] : '';
 			if ($value === '') {

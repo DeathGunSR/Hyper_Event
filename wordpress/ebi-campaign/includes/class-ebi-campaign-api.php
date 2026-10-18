@@ -217,8 +217,10 @@ final class Ebi_Campaign_Api {
 			return new WP_Error('ebi_bad_response', __('پاسخ سرویس کمپین قابل خواندن نبود.', 'ebi-campaign'));
 		}
 
-		// هر تغییر مدیریتی، کش عمومی همان سایت را بی‌اعتبار می‌کند.
-		self::flush_cache();
+		// هر تغییر مدیریتی، کش عمومی همان سایت را بی‌اعتبار می‌کند؛ خواندن‌ها کش را دور نمی‌ریزند.
+		if ('POST' === $args['method']) {
+			self::flush_cache();
+		}
 		return $data;
 	}
 
@@ -258,6 +260,25 @@ final class Ebi_Campaign_Api {
 	 */
 	public static function winner(int $round_no) {
 		return self::public_get('public/winners/' . max(1, $round_no));
+	}
+
+	/**
+	 * فهرست فراگرفت‌های قرعه‌کشی (مدیریتی).
+	 *
+	 * @return array<int,array<string,mixed>>|WP_Error
+	 */
+	public static function runs() {
+		return self::admin_request('lottery.run', 'GET', 'lottery');
+	}
+
+	/**
+	 * شمارهٔ کامل برندهٔ نهایی‌شده؛ فقط با کلید حریم خصوصی و با ثبت حسابرسی در سرویس مرکزی.
+	 *
+	 * @param int $run_id شناسهٔ فراگرفت.
+	 * @return array<string,mixed>|WP_Error
+	 */
+	public static function winner_contact(int $run_id) {
+		return self::admin_request('privacy.contact', 'GET', 'lottery/' . max(1, $run_id) . '/winner-contact');
 	}
 
 	/**

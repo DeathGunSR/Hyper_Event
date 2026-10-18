@@ -1,5 +1,9 @@
 {
     "admin_key": "mock-admin-key",
+    "admin_keys": [
+        "mock-admin-key",
+        "lottery-secret-9876"
+    ],
     "fail_public": false,
     "campaign": {
         "state": "Collecting",
@@ -169,5 +173,16 @@
     "run_detail": {
         "runId": 1,
         "status": "Finalized"
+    },
+    "winner_contact": {
+        "runId": 1,
+        "roundId": 5,
+        "roundNo": 1,
+        "status": "Finalized",
+        "winnerFCode": 500001,
+        "winnerEntryNo": 1,
+        "winnerPoints": 10,
+        "winnerCustomerCode": "00001",
+        "winnerMobile": "09121230000"
     }
 }

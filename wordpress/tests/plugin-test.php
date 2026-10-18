@@ -116,6 +116,11 @@ if (!is_dir($plugin_dir)) {
 
 	// بدنهٔ واقعی هوک فعال‌سازی همان تابعی است که وردپرس هنگام نصب فراخوانی می‌کند.
 	ebi_campaign_activate();
+	// توانایی‌های تازه‌افزوده باید در کش کاربر هم دیده شوند (وردپرس همهٔ caps را کش می‌کند).
+	foreach (get_users(array('role' => 'administrator', 'fields' => 'ID')) as $admin_user_id) {
+		clean_user_cache((int) $admin_user_id);
+	}
+	wp_set_current_user($admin_id);
 
 	$role = get_role('administrator');
 	$caps = array_keys(ebi_campaign_capability_map());
@@ -263,9 +268,166 @@ t_check('آدرس بیرونی برای تصویر برنده رد می‌شود
 @unlink($fake); @unlink($png); @unlink($big);
 
 // ------------------------------------------------------------------
-// ۷) مجوز، نونس و تأیید در عملیات مدیریتی (فرایند جداگانه)
+// ۷) پیامک: قالب، پیش‌نمایش، ارسال دستی و گزارش
 // ------------------------------------------------------------------
-echo "\n--- ۷) کنترل مجوز عملیات مدیریتی ---\n";
+echo "\n--- ۷) پیامک ملی‌پیامک (ارسال دستی) ---\n";
+
+global $sms_calls, $sms_mode;
+// وضعیت آزمون قبلی نباید در نتیجهٔ این اجرا اثر بگذارد.
+delete_option(Ebi_Campaign_Sms::OPTION_TEMPLATES);
+delete_option(Ebi_Campaign_Sms::OPTION_LOG);
+$sms_calls = array();
+$sms_mode  = 'sent';
+add_filter('ebi_campaign_sms_transport', static function ($custom) {
+	return static function (array $args) {
+		global $sms_calls, $sms_mode;
+		$sms_calls[] = $args;
+		if ('failed' === $sms_mode) {
+			return array('status' => 'failed', 'code' => '2', 'message' => 'اعتبار کافی نیست');
+		}
+		if ('unknown' === $sms_mode) {
+			return array('status' => 'unknown', 'code' => 'timeout', 'message' => 'پاسخ دریافت نشد');
+		}
+		return array('status' => 'sent', 'recId' => 'RID-' . count($sms_calls), 'code' => '1', 'message' => 'ارسال شد');
+	};
+});
+
+$sms_clean = Ebi_Campaign_Sms::save_settings(array(
+	'username' => 'ebi-user',
+	'sender'   => '1000 1234',
+	'api_base' => 'https://rest.payamak-panel.com/',
+));
+t_check('شمارهٔ فرستنده فقط رقم نگه می‌دارد', '10001234' === $sms_clean['sender'], $sms_clean['sender']);
+t_check('اسلش انتهایی آدرس پیامک حذف می‌شود', !str_ends_with($sms_clean['api_base'], '/'), $sms_clean['api_base']);
+
+Ebi_Campaign_Settings::store_secret('sms.send', 'sms-pass-1234');
+$sms_status = Ebi_Campaign_Settings::secret_status();
+t_check('رمز پیامک فقط چهار رقم آخر را نشان می‌دهد', '****1234' === ($sms_status['sms.send'] ?? ''), (string) ($sms_status['sms.send'] ?? ''));
+
+ob_start();
+Ebi_Campaign_Admin::page_settings();
+$settings_html = (string) ob_get_clean();
+t_check('صفحهٔ تنظیمات رمز پیامک را چاپ نمی‌کند', !str_contains($settings_html, 'sms-pass-1234'), '');
+t_check('صفحهٔ تنظیمات فیلد نام کاربری پیامک دارد', str_contains($settings_html, 'ebi_sms[username]'), '');
+t_check('صفحهٔ تنظیمات فیلد شمارهٔ فرستنده دارد', str_contains($settings_html, 'ebi_sms[sender]'), '');
+
+$bad_template = Ebi_Campaign_Sms::save_template(array('name' => 'بد', 'body' => 'سلام {bogus}'));
+t_check('متغیر ناشناخته در قالب رد می‌شود', is_wp_error($bad_template), '');
+
+global $sms_tpl_general, $sms_tpl_winner;
+$sms_tpl_general = Ebi_Campaign_Sms::save_template(array(
+	'name' => 'اطلاع‌رسانی دوره',
+	'body' => 'سلام {name}، دورهٔ {round} کمپین {store} با جایزهٔ {prize} در جریان است. پشتیبانی: {support}',
+));
+t_check('قالب معتبر ذخیره می‌شود', is_int($sms_tpl_general) && $sms_tpl_general > 0, (string) $sms_tpl_general);
+
+$sms_tpl_winner = Ebi_Campaign_Sms::save_template(array(
+	'name' => 'تبریک برنده',
+	'kind' => 'winner',
+	'body' => 'تبریک {name}! شما برندهٔ دورهٔ {round} با جایزهٔ {prize} شدید. پشتیبانی: {support}',
+));
+t_check('قالب تبریک برنده جداگانه ذخیره می‌شود', is_int($sms_tpl_winner), '');
+
+t_check('فهرست قالب‌ها هر دو قالب را دارد', count(Ebi_Campaign_Sms::templates()) === 2, (string) count(Ebi_Campaign_Sms::templates()));
+
+global $sample_ctx;
+$sample_ctx = array('name' => 'آقای ر.', 'round' => '2', 'prize' => '۱۰ میلیون تومان');
+$rendered = Ebi_Campaign_Sms::preview((string) Ebi_Campaign_Sms::template($sms_tpl_winner)['body'], $sample_ctx);
+t_check('متغیرها در پیش‌نمایش جایگزین می‌شوند', !is_wp_error($rendered) && str_contains($rendered, 'آقای ر.') && str_contains($rendered, 'دورهٔ 2'), is_wp_error($rendered) ? $rendered->get_error_message() : '');
+t_check('مقدار پیش‌فرض پشتیبانی در متن درج می‌شود',
+	!is_wp_error($rendered) && str_contains($rendered, (string) Ebi_Campaign_Settings::get('support_text', '')), '');
+$store_preview = Ebi_Campaign_Sms::preview('کمپین {store} — دورهٔ {round}', array('round' => '1'));
+t_check('نام فروشگاه به‌صورت پیش‌فرض درج می‌شود',
+	!is_wp_error($store_preview) && str_contains($store_preview, get_bloginfo('name')), '');
+t_check('پیش‌نمایش هیچ متغیر پرنشده ندارد', !is_wp_error($rendered) && !preg_match('/\{[a-z_]+\}/', $rendered), is_wp_error($rendered) ? '' : $rendered);
+
+$missing = Ebi_Campaign_Sms::preview('سلام {name}، جایزهٔ {prize}.', array('name' => ''));
+t_check('مقدار خالی متغیر پیش از ارسال خطا می‌دهد', is_wp_error($missing), '');
+t_check('خطای متغیر خالی پیام روشن دارد', is_wp_error($missing) && str_contains($missing->get_error_message(), '{name}'), is_wp_error($missing) ? $missing->get_error_message() : '');
+
+$recipient = array('mobile' => '09120001111', 'name' => 'آقای ر.', 'round' => '2', 'prize' => '۱۰ میلیون تومان', 'date' => '', 'masked' => false);
+
+$admins = get_users(array('role' => 'administrator', 'number' => 1, 'fields' => 'ID'));
+$sms_admin = !empty($admins) ? (int) $admins[0] : 0;
+wp_set_current_user($sms_admin);
+
+$sms_calls = array();
+$blocked = Ebi_Campaign_Sms::send_manual((int) $sms_tpl_winner, array($recipient), 'tester', false);
+t_check('ارسال بدون تأیید صریح انجام نمی‌شود', is_wp_error($blocked) && str_contains($blocked->get_error_message(), 'تأیید'), '');
+t_check('درخواست بدون تأیید به سرویس پیامک نمی‌رسد', count($sms_calls) === 0, (string) count($sms_calls));
+
+wp_set_current_user(0);
+$no_cap = Ebi_Campaign_Sms::send_manual((int) $sms_tpl_winner, array($recipient), 'guest', true);
+t_check('کاربر بدون مجوز نمی‌تواند پیامک بفرستد', is_wp_error($no_cap) && 'ebi_sms_forbidden' === $no_cap->get_error_code(), '');
+t_check('درخواست بدون مجوز به سرویس پیامک نمی‌رسد', count($sms_calls) === 0, '');
+wp_set_current_user($sms_admin);
+
+$sms_mode = 'sent';
+$ok_send = Ebi_Campaign_Sms::send_manual((int) $sms_tpl_winner, array($recipient), 'owner', true);
+t_check('ارسال دستی با مجوز و تأیید انجام می‌شود', !is_wp_error($ok_send) && 1 === (int) $ok_send['sent'], is_wp_error($ok_send) ? $ok_send->get_error_message() : json_encode($ok_send));
+t_check('متن ارسالی با متن جایگزین‌شده می‌خواند', count($sms_calls) === 1 && $sms_calls[0]['text'] === $rendered, count($sms_calls) === 1 ? $sms_calls[0]['text'] : '');
+
+$log = Ebi_Campaign_Sms::log_entries();
+t_check('ارسال موفق در تاریخچه ثبت می‌شود', !empty($log) && 'sent' === ($log[0]['status'] ?? ''), json_encode($log[0] ?? array()));
+t_check('تاریخچه شمارهٔ کامل موبایل ندارد', !empty($log) && !str_contains((string) ($log[0]['to'] ?? ''), '09120001111') && str_contains((string) ($log[0]['to'] ?? ''), '***'), '');
+t_check('شناسهٔ سرویس در تاریخچه ثبت می‌شود', !empty($log) && '' !== (string) ($log[0]['rec_id'] ?? ''), '');
+
+$round_recipients = Ebi_Campaign_Sms::winners_of_round(1);
+t_check('گیرندهٔ دوره از شمارهٔ کامل مدیریتی ساخته می‌شود', !is_wp_error($round_recipients) && '09121230000' === $round_recipients[0]['mobile'], is_wp_error($round_recipients) ? $round_recipients->get_error_message() : json_encode($round_recipients));
+
+$sms_calls = array();
+$round_send = is_array($round_recipients)
+	? Ebi_Campaign_Sms::send_manual((int) $sms_tpl_winner, $round_recipients, 'owner', true)
+	: $round_recipients;
+t_check('ارسال به برندهٔ دوره با گیرندهٔ درست انجام می‌شود', !is_wp_error($round_send) && '09121230000' === ($sms_calls[0]['to'] ?? ''), is_wp_error($round_send) ? $round_send->get_error_message() : '');
+
+$before_unknown = count($sms_calls);
+$sms_mode = 'unknown';
+$unknown = Ebi_Campaign_Sms::send_manual((int) $sms_tpl_general, array($recipient), 'owner', true);
+t_check('پاسخ نامشخص به‌عنوان موفق گزارش نمی‌شود', !is_wp_error($unknown) && 1 === (int) $unknown['unknown'] && 0 === (int) $unknown['sent'], is_wp_error($unknown) ? $unknown->get_error_message() : json_encode($unknown));
+t_check('Timeout فقط یک بار تلاش می‌کند (بدون retry خودکار)', count($sms_calls) === $before_unknown + 1, (string) count($sms_calls));
+
+$unknown_log = Ebi_Campaign_Sms::log_entries(array('status' => 'unknown'));
+t_check('وضعیت نامشخص در تاریخچه قابل مشاهده است', !empty($unknown_log) && 'unknown' === ($unknown_log[0]['status'] ?? ''), json_encode($unknown_log[0] ?? array()));
+t_check('کد پاسخ نامشخص ذخیره می‌شود', !empty($unknown_log) && 'timeout' === (string) ($unknown_log[0]['code'] ?? ''), '');
+$sms_mode = 'failed';
+$failed = Ebi_Campaign_Sms::send_manual((int) $sms_tpl_general, array($recipient), 'owner', true);
+t_check('خطای سرویس به‌عنوان ناموفق ثبت می‌شود', !is_wp_error($failed) && 1 === (int) $failed['failed'], is_wp_error($failed) ? $failed->get_error_message() : json_encode($failed));
+
+$filtered = Ebi_Campaign_Sms::log_entries(array('status' => 'failed'));
+t_check('فیلتر تاریخچه به وضعیت درست محدود می‌شود', count($filtered) === 1 && 'failed' === $filtered[0]['status'], (string) count($filtered));
+$by_search = Ebi_Campaign_Sms::log_entries(array('search' => 'RID-1'));
+t_check('جست‌وجو در تاریخچه بر شناسهٔ سرویس کار می‌کند', !empty($by_search), '');
+
+$sms_calls = array();
+ebi_campaign_activate();
+do_shortcode('[ebi_campaign]');
+do_shortcode('[ebi_winners]');
+t_check('فعال‌سازی و بازدید صفحه هیچ پیامکی نمی‌فرستد', count($sms_calls) === 0, (string) count($sms_calls));
+
+$sms_source = (string) file_get_contents(EBI_CAMPAIGN_DIR . 'includes/class-ebi-campaign-sms.php');
+t_check('کلاس پیامک هیچ هوک خودکاری ثبت نمی‌کند', !str_contains($sms_source, 'add_action(') && !str_contains($sms_source, 'wp_schedule_event'), '');
+t_check('کلاس پیامک هیچ صف retry ندارد', !str_contains($sms_source, 'wp_next_scheduled') && !str_contains($sms_source, 'retry_queue'), '');
+
+ob_start();
+Ebi_Campaign_Admin::page_sms();
+$sms_page = (string) ob_get_clean();
+t_check('صفحهٔ پیامک قالب‌ها را نشان می‌دهد', str_contains($sms_page, 'تبریک برنده'), '');
+t_check('صفحهٔ پیامک تأیید صریح می‌خواهد', str_contains($sms_page, 'تأیید می‌کنم') || str_contains($sms_page, 'تأیید'), '');
+t_check('صفحهٔ پیامک متن پیامک را چاپ نمی‌کند', !str_contains($sms_page, 'sms-pass-1234'), '');
+
+$ops = Ebi_Campaign_Admin::operations();
+t_check('عملیات ارسال پیامک مجوز و تأیید صریح دارد',
+	isset($ops['send_sms']) && 'ebi_send_sms' === $ops['send_sms']['cap'] && true === $ops['send_sms']['confirm'], '');
+t_check('پیش‌نمایش پیامک تأیید نمی‌خواهد و ارسال نمی‌کند',
+	isset($ops['preview_sms']) && false === $ops['preview_sms']['confirm'], '');
+t_check('حذف قالب تأیید صریح می‌خواهد',
+	isset($ops['delete_sms_template']) && true === $ops['delete_sms_template']['confirm'], '');
+
+// ------------------------------------------------------------------
+// ۸) مجوز، نونس و تأیید در عملیات مدیریتی (فرایند جداگانه)
+// ------------------------------------------------------------------
+echo "\n--- ۸) کنترل مجوز عملیات مدیریتی ---\n";
 $admins = get_users(array('role' => 'administrator', 'number' => 1, 'fields' => 'ID'));
 $admin_id = !empty($admins) ? (int) $admins[0] : 0;
 t_check('کاربر مدیر برای آزمون پیدا شد', $admin_id > 0, '');

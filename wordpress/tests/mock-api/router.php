@@ -75,8 +75,11 @@ if (str_starts_with($path, '/api/v1/public/')) {
 
 if (str_starts_with($path, '/api/v1/admin/')) {
 	$expected = (string) ($state['admin_key'] ?? 'mock-admin-key');
+	$allowed  = isset($state['admin_keys']) && is_array($state['admin_keys'])
+		? array_map('strval', $state['admin_keys'])
+		: array($expected);
 	$provided = (string) ($_SERVER['HTTP_X_ADMIN_KEY'] ?? '');
-	if ($provided !== $expected) {
+	if ($provided === '' || (!in_array($provided, $allowed, true) && $provided !== $expected)) {
 		mock_reply(array('code' => 'admin_unauthorized', 'message' => 'کلید مدیر نامعتبر است.'), 401);
 	}
 
@@ -99,6 +102,9 @@ if (str_starts_with($path, '/api/v1/admin/')) {
 		mock_reply(array('ok' => true, 'assigned' => 2, 'message' => 'انجام شد.'));
 	}
 
+	if (preg_match('#^/api/v1/admin/lottery/(\d+)/winner-contact$#', $path, $m)) {
+		mock_reply($state['winner_contact'] ?? array('runId' => (int) $m[1]));
+	}
 	if ('/api/v1/admin/rounds' === $path) {
 		mock_reply($state['rounds'] ?? array());
 	}

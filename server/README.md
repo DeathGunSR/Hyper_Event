@@ -103,6 +103,20 @@ curl http://127.0.0.1:5080/health   # سلامت تفصیلی + دورهٔ جا�
 | POST | `/api/v1/admin/lottery/{id}/publish` | `lottery.publish` | تأیید صریح انتشار عمومی نتیجه (`confirm=true`) |
 | POST | `/api/v1/admin/lottery/{id}/unpublish` | `lottery.publish` | لغو انتشار عمومی با دلیل |
 | POST | `/api/v1/admin/lottery/{id}/image` | `lottery.publish` | ثبت/حذف تصویر برنده با تأیید رضایت |
+| GET | `/api/v1/admin/bale/registrations` | `privacy.contact` | فهرست ثبت‌نام‌های بله (شمارهٔ سانسورشده) |
+| POST | `/api/v1/admin/bale/check` | `privacy.contact` | بررسی عضویت یک شماره با ثبت شاهد |
+
+### مسیرهای عامل ربات بله (HMAC، همان امضای صندوق)
+
+| متد | مسیر | کار |
+|---|---|---|
+| POST | `/api/v1/agent/bale/register` | ثبت شماره‌ای که کاربر در بله به اشتراک گذاشته (`contactShared=true`) |
+| POST | `/api/v1/agent/bale/status` | وضعیت عضویت: `member`، `not_member` یا `unknown` |
+| POST | `/api/v1/agent/bale/lookup` | شمارهٔ متصل به یک حساب بله برای بررسی وضعیت |
+
+شمارهٔ کامل در پاسخ ثبت‌نام و وضعیت نیست (فقط سانسورشده)؛ `lookup` شمارهٔ کامل را فقط به
+عامل امضاشده برمی‌گرداند. هر بررسی عضویت در `BaleMembershipCheck` و `AuditLog` ثبت می‌شود.
+بدون ثبت‌نام یا با خطای شبکه، وضعیت `unknown` است و هرگز به‌معنای عضویت نیست.
 
 ### مسیرهای عمومی (بدون احراز هویت، با محدودیت نرخ و کش)
 
@@ -181,11 +195,41 @@ signature = HMAC_SHA256(agentSecret, canonical)  // hex
 ۵. `POST /admin/lottery/{id}/finalize` نتیجه را رسمی می‌کند. پس از آن، هر تغییر وضعیت فاکتور آن دوره
    فقط با مسیر ویژهٔ `decision` و `force=true` + دلیل مکتوب ممکن است و فراگرفت برای بازبینی علامت می‌خورد.
 
+## ربات بله
+
+سرویس مستقل `EbiCampaign.BaleBot` با Bot API بله کار می‌کند و از دو حالت پشتیبانی می‌کند:
+
+```bash
+# حالت پیش‌فرض: webhook روی مسیر پیکربندی‌شده
+dotnet run --project EbiCampaign.BaleBot
+
+# ثبت webhook پس از استقرار HTTPS
+dotnet run --project EbiCampaign.BaleBot -- --set-webhook
+
+# حالت توسعه: دریافت به‌روزرسانی‌ها با getUpdates
+dotnet run --project EbiCampaign.BaleBot -- --poll
+```
+
+پیکربندی در `appsettings.json` یا متغیر محیطی: `Bale:Token`، `Bale:ChannelUrl`،
+`Bale:WebhookPath`، `Bale:PublicBaseUrl` و `Central:BaseUrl`، `Central:AgentId`،
+`Central:AgentSecret`. کلید عامل باید در `Auth:Agents:{agentId}` سرویس مرکزی هم باشد.
+
+قواعد ثابت ربات:
+
+- شماره فقط از `message.contact` (اشتراک‌گذاری رسمی) پذیرفته می‌شود؛ شمارهٔ تایپ‌شده ثبت نمی‌شود.
+- ثبت تکراری همان حساب در ۶۰ ثانیه و شمارهٔ متصل به حساب بلهٔ دیگر رد می‌شود.
+- وضعیت عضویت فقط از سرویس مرکزی می‌آید؛ خطا/Timeout هرگز «عضو» تفسیر نمی‌شود.
+- ربات هیچ پیامک نمی‌فرستد و هیچ داده‌ای را قطعی اعلام نمی‌کند.
+
+SMS در سرویس مرکزی وجود ندارد؛ ارسال دستی پیامک داخل افزونهٔ وردپرس است
+(نگاه کنید به `wordpress/README.md`). هیچ رویداد سرور یا ربات پیامک نمی‌فرستد.
+
 ## آزمون
 
 ```bash
 # از ریشهٔ server
-dotnet run --project EbiCampaign.Tests                 # ۱۹۰ بررسی (۷۸ فاز ۱ + ۱۱۲ فاز ۲)
+dotnet run --project EbiCampaign.Tests                 # ۳۰۲ بررسی (فاز ۱، ۲ و ۳)
+dotnet run --project EbiCampaign.BaleBot.Tests         # ۳۰ بررسی ربات با Mock
 EBI_LOAD=800x32 dotnet run --project EbiCampaign.Tests # آزمون بار: ۸۰۰ ارسال با همزمانی ۳۲
 ```
 

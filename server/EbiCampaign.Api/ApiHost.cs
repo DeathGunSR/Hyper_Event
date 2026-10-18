@@ -40,8 +40,15 @@ public static class ApiHost
         });
         builder.Services.AddSingleton<CampaignService>();
         builder.Services.AddSingleton<ReviewDecisionService>();
-        // پیش‌فرض: هیچ اتصال بله‌ای پیکربندی نشده است؛ سرویس جایگزین فقط برای آزمون تزریق می‌شود.
-        builder.Services.AddSingleton<IBaleMembershipProvider, UnconfiguredBaleProvider>();
+
+        // بله: بدون توکن/کانال، وضعیت همیشه «نامعلوم» می‌ماند و قرعه‌کشی واجد شرایط اعلام نمی‌کند.
+        builder.Services.AddSingleton(sp => BaleOptions.From(builder.Configuration));
+        builder.Services.AddHttpClient<IBaleBotApi, BaleBotApi>();
+        builder.Services.AddSingleton<BaleService>();
+        builder.Services.AddSingleton<IBaleMembershipProvider>(sp =>
+            sp.GetRequiredService<BaleOptions>().IsConfigured
+                ? ActivatorUtilities.CreateInstance<BaleMembershipProvider>(sp)
+                : new UnconfiguredBaleProvider());
         builder.Services.AddSingleton<LotteryService>();
         builder.Services.AddSingleton(new PublicCache());
         builder.Services.AddSingleton(sp => new PublicRateLimiter(
@@ -250,6 +257,75 @@ public static class ApiHost
             PublicVerifyResult? result = await svc.GetVerifyAsync(id, ctx.RequestAborted);
             if (result == null) throw new ApiException(404, "not_found", "سند قرعه‌کشی پیدا نشد.");
             return PublicJson(ctx, result, 60);
+        });
+
+        // ---------------- بله: ثبت‌نام ربات و بررسی عضویت (بند ۹) ----------------
+        app.MapPost("/api/v1/agent/bale/register", async (HttpContext ctx, BaleService svc) =>
+        {
+            byte[] body = await ReadBodyAsync(ctx, 4096);
+            string agentId = RequireAgent(ctx, body);
+            BaleRegisterRequest? req = JsonSerializer.Deserialize<BaleRegisterRequest>(body, Json);
+            if (req == null) throw new ApiException(400, "body_invalid", "بدنهٔ درخواست قابل خواندن نیست.");
+
+            (BaleRegistration? reg, string? error) = await svc.RegisterAsync(req, agentId, ctx.RequestAborted);
+            if (reg == null)
+                throw new ApiException(error == "mobile_registered_to_other_account" ? 409 : 400,
+                    error ?? "register_failed", error switch
+                    {
+                        "invalid_mobile" => "شمارهٔ موبایل معتبر نیست.",
+                        "invalid_bale_user" => "شناسهٔ حساب بله معتبر نیست.",
+                        "contact_not_shared" => "شماره فقط با اشتراک‌گذاری مستقیم کاربر در بله پذیرفته می‌شود.",
+                        "mobile_registered_to_other_account" => "این شماره پیش‌تر به حساب بلهٔ دیگری متصل شده است.",
+                        _ => "ثبت‌نام انجام نشد."
+                    });
+
+            return Results.Json(new
+            {
+                registered = true,
+                baleUserId = reg.BaleUserId,
+                mobileMasked = reg.MobileMasked,
+                contactShared = reg.ContactShared,
+                verifiedAt = reg.VerifiedAt
+            }, Json);
+        });
+
+        app.MapPost("/api/v1/agent/bale/status", async (HttpContext ctx, BaleService svc) =>
+        {
+            byte[] body = await ReadBodyAsync(ctx, 2048);
+            string agentId = RequireAgent(ctx, body);
+            BaleStatusRequest? req = JsonSerializer.Deserialize<BaleStatusRequest>(body, Json);
+            if (req == null) throw new ApiException(400, "body_invalid", "بدنهٔ درخواست قابل خواندن نیست.");
+            BaleStatusResult status = await svc.GetStatusAsync(req.Mobile, "agent:" + agentId, ctx.RequestAborted);
+            return Results.Json(status, Json);
+        });
+
+        app.MapPost("/api/v1/agent/bale/lookup", async (HttpContext ctx, BaleService svc) =>
+        {
+            byte[] body = await ReadBodyAsync(ctx, 1024);
+            RequireAgent(ctx, body);
+            BaleLookupRequest? req = JsonSerializer.Deserialize<BaleLookupRequest>(body, Json);
+            if (req == null || req.BaleUserId <= 0)
+                throw new ApiException(400, "body_invalid", "شناسهٔ حساب بله معتبر نیست.");
+            string? mobile = await svc.GetMobileByBaleUserAsync(req.BaleUserId, ctx.RequestAborted);
+            // فقط برای همان عامل امضاشده؛ شماره کامل در پاسخ عمومی یا لاگ چاپ نمی‌شود.
+            return Results.Json(new { registered = mobile != null, mobile }, Json);
+        });
+
+        app.MapGet("/api/v1/admin/bale/registrations", async (HttpContext ctx, BaleService svc) =>
+        {
+            RequireAdmin(ctx, Cap.PrivacyContact);
+            int limit = int.TryParse(ctx.Request.Query["limit"], out int l) ? l : 100;
+            IReadOnlyList<BaleRegistration> list = await svc.ListAsync(limit, ctx.RequestAborted);
+            return Results.Json(new { count = list.Count, registrations = list }, Json);
+        });
+
+        app.MapPost("/api/v1/admin/bale/check", async (HttpContext ctx, BaleService svc) =>
+        {
+            RequireAdmin(ctx, Cap.PrivacyContact);
+            BaleStatusRequest? req = await ReadOptionalJsonAsync<BaleStatusRequest>(ctx);
+            if (req == null) throw new ApiException(400, "body_required", "بدنهٔ درخواست الزامی است.");
+            BaleStatusResult status = await svc.GetStatusAsync(req.Mobile, ActorOf(ctx), ctx.RequestAborted);
+            return Results.Json(status, Json);
         });
 
         // ---------------- مسیر تصمیم مدیر (بند ۴.۲) ----------------
