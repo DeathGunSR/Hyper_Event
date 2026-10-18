@@ -1,0 +1,173 @@
+{
+    "admin_key": "mock-admin-key",
+    "fail_public": false,
+    "campaign": {
+        "state": "Collecting",
+        "stateText": "دورهٔ جاری در حال جمع‌آوری فاکتور است.",
+        "roundNo": 2,
+        "roundStatus": "Collecting",
+        "count": 612,
+        "target": 1000,
+        "remaining": 388,
+        "progressPercent": 61.2,
+        "prizeToman": 10000000,
+        "acceptingNewInvoices": true,
+        "awaitingManagerStart": false,
+        "lastResult": {
+            "roundNo": 1,
+            "drawnAt": "2026-02-01T10:00:00",
+            "publishedAt": "2026-02-02 09:30:00",
+            "prizeToman": 10000000,
+            "mobileMasked": "0912***0000",
+            "displayName": "خانم م.",
+            "imageUrl": "https:\/\/localhost\/hypermarket\/wp-content\/uploads\/winner.jpg",
+            "entryCount": 1000,
+            "eligibleCount": 998,
+            "totalWeight": 1200,
+            "verificationStatus": "recomputable"
+        },
+        "updatedAt": "2026-03-01T12:00:00"
+    },
+    "winners": {
+        "page": 1,
+        "perPage": 10,
+        "total": 2,
+        "hasMore": true,
+        "winners": [
+            {
+                "roundNo": 2,
+                "drawnAt": "2026-03-01T10:00:00",
+                "prizeToman": 10000000,
+                "mobileMasked": "0935***1111",
+                "displayName": "آقای ر.",
+                "imageUrl": "https:\/\/localhost\/hypermarket\/wp-content\/uploads\/winner2.jpg",
+                "entryCount": 1000,
+                "eligibleCount": 990,
+                "totalWeight": 1500,
+                "verificationStatus": "recomputable"
+            },
+            {
+                "roundNo": 1,
+                "drawnAt": "2026-02-01T10:00:00",
+                "prizeToman": 10000000,
+                "mobileMasked": "0912***0000",
+                "displayName": "<script>alert(1)<\/script>",
+                "imageUrl": null,
+                "entryCount": 1000,
+                "eligibleCount": 998,
+                "totalWeight": 1200,
+                "verificationStatus": "pending"
+            }
+        ]
+    },
+    "lottery_receipt": {
+        "runId": 1,
+        "roundNo": 1,
+        "verified": true
+    },
+    "lottery_verify": {
+        "runId": 1,
+        "publicEntriesHashMatches": true,
+        "commitmentMatches": true,
+        "winnerReproduces": true
+    },
+    "lottery_entries": {
+        "runId": 1,
+        "page": 1,
+        "perPage": 200,
+        "total": 1000,
+        "hasMore": true,
+        "entries": []
+    },
+    "rounds": [
+        {
+            "roundId": 7,
+            "roundNo": 3,
+            "status": "Collecting",
+            "target": 1000,
+            "count": 612,
+            "held": 4
+        },
+        {
+            "roundId": 6,
+            "roundNo": 2,
+            "status": "Closed",
+            "target": 1000,
+            "count": 1000,
+            "held": 0
+        },
+        {
+            "roundId": 5,
+            "roundNo": 1,
+            "status": "Completed",
+            "target": 1000,
+            "count": 1000,
+            "held": 1
+        }
+    ],
+    "held": [
+        {
+            "invoiceId": 101,
+            "fCode": 900001,
+            "fDate": "2026-03-01",
+            "jalali": "1404\/12\/10",
+            "cashier": "صندوق ۱",
+            "gross": 5000000,
+            "points": 10,
+            "status": "Held"
+        },
+        {
+            "invoiceId": 102,
+            "fCode": 900002,
+            "fDate": "2026-03-01",
+            "jalali": "1404\/12\/10",
+            "cashier": "صندوق ۲",
+            "gross": 2500000,
+            "points": 5,
+            "status": "Held"
+        }
+    ],
+    "invoices": [
+        {
+            "invoiceId": 55,
+            "fCode": 800055,
+            "fDate": "2026-03-02",
+            "jalali": "1404\/12\/11",
+            "gross": 5000000,
+            "points": 0,
+            "status": "NeedsReview",
+            "reviewReason": "missing",
+            "reviewEvidence": "source=Holoo1;day=2026-03-02;checks=2"
+        }
+    ],
+    "runs": [
+        {
+            "runId": 1,
+            "roundId": 5,
+            "roundNo": 1,
+            "status": "Finalized",
+            "publishApproved": true,
+            "winnerMobile": "0912***0000",
+            "winnerImageApproved": true,
+            "winnerImageUrl": "https:\/\/localhost\/hypermarket\/wp-content\/uploads\/winner.jpg",
+            "entryCount": 1000,
+            "eligibleCount": 998,
+            "seedHex": "aa"
+        },
+        {
+            "runId": 2,
+            "roundId": 6,
+            "roundNo": 2,
+            "status": "Committed",
+            "publishApproved": false,
+            "winnerMobile": "",
+            "entryCount": 1000,
+            "eligibleCount": 990,
+            "seedHex": null
+        }
+    ],
+    "run_detail": {
+        "runId": 1,
+        "status": "Finalized"
+    }
+}

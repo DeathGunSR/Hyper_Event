@@ -1,0 +1,308 @@
+/**
+ * استایل صفحه‌های عمومی کمپین — راست‌به‌چپ و واکنش‌گرا.
+ * فقط زمانی بارگذاری می‌شود که یکی از شورت‌کدهای کمپین در صفحه اجرا شود.
+ */
+
+.ebi-campaign {
+	--ebi-primary: #1f7a4d;
+	--ebi-primary-soft: #e8f5ee;
+	--ebi-ink: #1f2430;
+	--ebi-muted: #5b6472;
+	--ebi-line: #e3e7ee;
+	--ebi-radius: 14px;
+	direction: rtl;
+	text-align: right;
+	color: var(--ebi-ink);
+	font-size: 1rem;
+	line-height: 1.9;
+	margin: 1.5rem 0;
+}
+
+.ebi-campaign * {
+	box-sizing: border-box;
+}
+
+.ebi-header {
+	background: linear-gradient(135deg, var(--ebi-primary-soft), #ffffff);
+	border: 1px solid var(--ebi-line);
+	border-radius: var(--ebi-radius);
+	padding: 1.25rem 1.5rem;
+}
+
+.ebi-title {
+	margin: 0 0 0.5rem;
+	font-size: 1.6rem;
+	line-height: 1.5;
+}
+
+.ebi-prize {
+	margin: 0;
+	font-weight: 700;
+	color: var(--ebi-primary);
+}
+
+.ebi-state {
+	display: inline-block;
+	margin: 0.75rem 0 0;
+	padding: 0.25rem 0.75rem;
+	border-radius: 999px;
+	background: #ffffff;
+	border: 1px solid var(--ebi-line);
+	font-size: 0.9rem;
+}
+
+.ebi-state--collecting { border-color: var(--ebi-primary); color: var(--ebi-primary); }
+.ebi-state--requiresreview { border-color: #b45309; color: #b45309; }
+.ebi-state--resultpublished { border-color: var(--ebi-primary); color: var(--ebi-primary); }
+
+.ebi-state-text {
+	margin: 0.5rem 0 0;
+	color: var(--ebi-muted);
+}
+
+.ebi-progress-block,
+.ebi-last-result,
+.ebi-winners-grid,
+.ebi-rules,
+.ebi-bale {
+	margin-top: 1.5rem;
+}
+
+.ebi-section-title {
+	font-size: 1.25rem;
+	margin: 0 0 0.75rem;
+	padding-right: 0.6rem;
+	border-right: 4px solid var(--ebi-primary);
+	line-height: 1.6;
+}
+
+.ebi-count strong {
+	font-size: 2rem;
+	color: var(--ebi-primary);
+}
+
+.ebi-target,
+.ebi-counter__target {
+	color: var(--ebi-muted);
+	font-size: 0.9rem;
+}
+
+.ebi-bar {
+	position: relative;
+	height: 14px;
+	background: #eef1f6;
+	border-radius: 999px;
+	overflow: hidden;
+	margin: 0.75rem 0 0.4rem;
+}
+
+.ebi-bar__fill {
+	display: block;
+	height: 100%;
+	background: linear-gradient(90deg, var(--ebi-primary), #3aa06a);
+	border-radius: 999px;
+	transition: width 0.4s ease-out;
+}
+
+.ebi-bar__caption {
+	margin: 0;
+	font-size: 0.85rem;
+	color: var(--ebi-muted);
+}
+
+.ebi-remaining,
+.ebi-note {
+	margin: 0.6rem 0 0;
+	color: var(--ebi-muted);
+}
+
+.ebi-note {
+	background: #fff8e6;
+	border: 1px solid #f2e2b6;
+	border-radius: 10px;
+	padding: 0.5rem 0.75rem;
+}
+
+.ebi-winners-grid {
+	display: grid;
+	gap: 1rem;
+	grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.ebi-winner-card {
+	display: flex;
+	flex-direction: column;
+	background: #ffffff;
+	border: 1px solid var(--ebi-line);
+	border-radius: var(--ebi-radius);
+	overflow: hidden;
+}
+
+.ebi-winner-card__figure {
+	margin: 0;
+	aspect-ratio: 1 / 1;
+	background: #f5f7fa;
+	overflow: hidden;
+}
+
+.ebi-winner-card__figure img {
+	width: 100%;
+	height: 100%;
+	object-fit: cover;
+	display: block;
+}
+
+.ebi-winner-card__body {
+	padding: 1rem;
+}
+
+.ebi-winner-card__round {
+	margin: 0 0 0.4rem;
+	font-size: 1.05rem;
+}
+
+.ebi-winner-card__name {
+	margin: 0 0 0.3rem;
+	font-weight: 700;
+}
+
+.ebi-winner-card__mobile,
+.ebi-winner-card__prize,
+.ebi-winner-card__date,
+.ebi-winner-card__stats {
+	margin: 0.25rem 0;
+	color: var(--ebi-muted);
+	font-size: 0.92rem;
+}
+
+.ebi-verified {
+	margin: 0.6rem 0 0;
+	padding: 0.35rem 0.6rem;
+	background: var(--ebi-primary-soft);
+	color: var(--ebi-primary);
+	border-radius: 10px;
+	font-size: 0.85rem;
+}
+
+.ebi-empty,
+.ebi-support {
+	color: var(--ebi-muted);
+}
+
+.ebi-bale__steps,
+.ebi-rules ul {
+	margin: 0;
+	padding-right: 1.25rem;
+}
+
+.ebi-button {
+	display: inline-block;
+	padding: 0.6rem 1.2rem;
+	background: var(--ebi-primary);
+	color: #ffffff;
+	border-radius: 999px;
+	text-decoration: none;
+}
+
+.ebi-button:hover,
+.ebi-button:focus {
+	background: #17603c;
+	color: #ffffff;
+}
+
+.ebi-pagination {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	margin-top: 1.25rem;
+	flex-wrap: wrap;
+}
+
+.ebi-pagination__link {
+	padding: 0.35rem 0.9rem;
+	border: 1px solid var(--ebi-line);
+	border-radius: 999px;
+	text-decoration: none;
+}
+
+.ebi-pagination__info {
+	color: var(--ebi-muted);
+	font-size: 0.9rem;
+}
+
+.ebi-campaign--counter {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+}
+
+.ebi-counter__value {
+	font-size: 2.2rem;
+	font-weight: 800;
+	color: var(--ebi-primary);
+}
+
+.ebi-campaign--error {
+	background: #fdf1f1;
+	border: 1px solid #f3c4c4;
+	border-radius: var(--ebi-radius);
+	padding: 1rem 1.25rem;
+}
+
+.ebi-error__title {
+	margin: 0 0 0.4rem;
+	font-weight: 700;
+	color: #8a1f1f;
+}
+
+.ebi-error__detail,
+.ebi-error__hint {
+	margin: 0.2rem 0;
+	color: var(--ebi-muted);
+}
+
+@media (max-width: 600px) {
+	.ebi-campaign { font-size: 0.95rem; }
+	.ebi-title { font-size: 1.3rem; }
+	.ebi-count strong { font-size: 1.6rem; }
+	.ebi-winners-grid { grid-template-columns: 1fr; }
+}
+
+/* پنل مدیریت */
+.ebi-admin .ebi-action-form--inline {
+	display: inline-block;
+	margin: 0 0.25rem 0.25rem 0;
+}
+
+.ebi-admin .ebi-action-form input[type="text"] {
+	margin-bottom: 0.25rem;
+}
+
+.ebi-admin .ebi-confirm {
+	display: inline-block;
+	margin: 0 0.5rem;
+	font-size: 0.85rem;
+	color: #50575e;
+}
+
+.ebi-admin__card {
+	background: #ffffff;
+	border: 1px solid #dcdcde;
+	border-radius: 8px;
+	padding: 1rem 1.25rem;
+	margin-bottom: 1rem;
+}
+
+.ebi-admin .ebi-code {
+	direction: ltr;
+	text-align: left;
+	background: #f6f7f7;
+	padding: 0.75rem;
+	border-radius: 6px;
+	overflow-x: auto;
+}
+
+.ebi-admin .ebi-help-list {
+	list-style: disc;
+	padding-right: 1.25rem;
+}
