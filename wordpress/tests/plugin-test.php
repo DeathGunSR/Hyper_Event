@@ -416,6 +416,35 @@ t_check('صفحهٔ پیامک قالب‌ها را نشان می‌دهد', str
 t_check('صفحهٔ پیامک تأیید صریح می‌خواهد', str_contains($sms_page, 'تأیید می‌کنم') || str_contains($sms_page, 'تأیید'), '');
 t_check('صفحهٔ پیامک متن پیامک را چاپ نمی‌کند', !str_contains($sms_page, 'sms-pass-1234'), '');
 
+// مسیر واقعی فرم پنل: نونس، مجوز، تأیید و ارسال در یک فرایند جداگانه با انتقال‌دهندهٔ جعلی.
+$sms_mock_args = array(
+	'op'               => 'send_sms',
+	'nonce'            => 'valid',
+	'template_id'      => (string) $sms_tpl_winner,
+	'recipient_source' => 'test',
+	'test_mobile'      => '09120002222',
+	'sms_mock'         => '1',
+);
+
+$sms_denied = run_probe($sms_mock_args + array('user' => '0', 'confirm' => '1'));
+t_check('فرم ارسال پیامک برای کاربر بدون مجوز اجرا نمی‌شود',
+	!str_contains($sms_denied['output'], 'SMS_CALL'), $sms_denied['output']);
+
+$sms_no_confirm = run_probe($sms_mock_args + array('user' => (string) $sms_admin, 'confirm' => '0'));
+t_check('درخواست بدون تأیید به سرویس پیامک نمی‌رسد',
+	!str_contains($sms_no_confirm['output'], 'SMS_CALL'), $sms_no_confirm['output']);
+t_check('پیام تأیید صریح در فرم نمایش داده می‌شود',
+	str_contains($sms_no_confirm['output'], 'تأیید'), $sms_no_confirm['output']);
+
+$sms_sent = run_probe($sms_mock_args + array('user' => (string) $sms_admin, 'confirm' => '1'));
+t_check('فرم پنل پیامک را به شمارهٔ آزمایشی می‌فرستد',
+	str_contains($sms_sent['output'], 'SMS_CALL:09120002222'), $sms_sent['output']);
+t_check('نتیجهٔ ارسال دستی به کاربر گزارش می‌شود',
+	str_contains($sms_sent['output'], 'ارسال دستی انجام شد'), $sms_sent['output']);
+
+t_check('پیام آزمایشی نامعتبر از فرم رد می‌شود',
+	!str_contains(run_probe(array_merge($sms_mock_args, array('user' => (string) $sms_admin, 'confirm' => '1', 'test_mobile' => '12345')))['output'], 'SMS_CALL'), '');
+
 $ops = Ebi_Campaign_Admin::operations();
 t_check('عملیات ارسال پیامک مجوز و تأیید صریح دارد',
 	isset($ops['send_sms']) && 'ebi_send_sms' === $ops['send_sms']['cap'] && true === $ops['send_sms']['confirm'], '');

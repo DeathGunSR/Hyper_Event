@@ -53,7 +53,7 @@ $_POST = array(
 	'ebi_op'  => $op,
 	'confirm' => !empty($args['confirm']) ? '1' : '',
 );
-foreach (array('round_id', 'run_id', 'invoice_id', 'verdict', 'reason', 'limit') as $field) {
+foreach (array('round_id', 'run_id', 'invoice_id', 'verdict', 'reason', 'limit', 'template_id', 'recipient_source', 'test_mobile') as $field) {
 	if (isset($args[ $field ])) {
 		$_POST[ $field ] = (string) $args[ $field ];
 	}
@@ -66,6 +66,16 @@ if ($nonce === 'valid') {
 } elseif ($nonce !== '') {
 	$_POST['_wpnonce']    = $nonce;
 	$_REQUEST['_wpnonce'] = $nonce;
+}
+
+// حالت آزمون پیامک: انتقال‌دهندهٔ جعلی که هیچ ارتباط شبکه‌ای ندارد.
+if (isset($args['sms_mock']) && '1' === $args['sms_mock']) {
+	add_filter('ebi_campaign_sms_transport', static function ($custom) {
+		return static function (array $call) {
+			echo 'SMS_CALL:' . $call['to'] . ':' . md5((string) $call['text']) . "\n";
+			return array('status' => 'sent', 'recId' => 'probe-recid', 'code' => '1', 'message' => 'ok');
+		};
+	});
 }
 
 // خروجی HTML خطاهای wp_die را ساده و متنی می‌کنیم تا در آزمون قابل بررسی باشد.
